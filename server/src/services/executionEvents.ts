@@ -3,7 +3,7 @@ import type { Response } from 'express'
 export interface ExecutionEvent {
   type: string
   nodeId: string
-  data?: any
+  data?: unknown
 }
 
 type Connection = {
@@ -11,7 +11,7 @@ type Connection = {
   heartbeat: NodeJS.Timeout
 }
 
-const connections = new Map<number, Connection>()
+const connections = new Map<number, Set<Connection>>()
 const buffers = new Map<number, ExecutionEvent[]>()
 const BUFFER_LIMIT = 1000
 
@@ -32,9 +32,11 @@ export function emitExecutionEvent(executionId: number, event: ExecutionEvent) {
     buffers.set(executionId, [event])
   }
 
-  const connection = connections.get(executionId)
-  if (connection) {
-    connection.res.write(`data: ${JSON.stringify(event)}\n\n`)
+  const connectionSet = connections.get(executionId)
+  if (connectionSet) {
+    for (const connection of connectionSet) {
+      connection.res.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
   }
 }
 
@@ -50,11 +52,23 @@ export function registerExecutionConnection(executionId: number, res: Response) 
     res.write(':heartbeat\n\n')
   }, 15000)
 
-  connections.set(executionId, { res, heartbeat })
+  const connection: Connection = { res, heartbeat }
+  const set = connections.get(executionId)
+  if (set) {
+    set.add(connection)
+  } else {
+    connections.set(executionId, new Set([connection]))
+  }
 
   res.on('close', () => {
     clearInterval(heartbeat)
-    connections.delete(executionId)
+    const set = connections.get(executionId)
+    if (set) {
+      set.delete(connection)
+      if (set.size === 0) {
+        connections.delete(executionId)
+      }
+    }
   })
 }
 

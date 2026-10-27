@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { db, getWorkflow } from '../db/index.js'
 import { executeWorkflow } from '../services/executor.js'
-import { emitExecutionEvent } from '../services/executionEvents.js'
+import { emitExecutionEvent, clearExecutionBuffer } from '../services/executionEvents.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 import { HttpError } from '../middleware/errorHandler.js'
 import { validateId, validateWorkflow } from '../middleware/validation.js'
@@ -91,6 +91,7 @@ router.post('/:id/execute', asyncHandler(async (req, res) => {
     execution.ended_at,
     executionId
   ])
+  clearExecutionBuffer(executionId)
 
   res.json({ executionId, ...execution })
 }))

@@ -6,8 +6,8 @@
       <p>状态：{{ execution.status }}</p>
       <el-timeline>
         <el-timeline-item
-          v-for="log in execution.logs"
-          :key="log.time"
+          v-for="(log, index) in execution.logs"
+          :key="log.time + '-' + index"
           :type="log.level === 'error' ? 'danger' : 'primary'"
         >
           <p>{{ log.nodeId }} - {{ log.message }}</p>

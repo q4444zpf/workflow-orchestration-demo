@@ -190,8 +190,8 @@ describe('REST routes', () => {
 
       const text = events.join('')
       expect(text).toContain('"type":"connected"')
-      expect(text).toContain('"type":"state"')
-      expect(text).toContain('"type":"log"')
+      expect(text).not.toContain('"type":"state"')
+      expect(text).not.toContain('"type":"log"')
     })
   })
 })

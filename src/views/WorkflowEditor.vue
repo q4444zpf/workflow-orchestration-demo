@@ -29,7 +29,7 @@ import NodeLibrary from '../components/NodeLibrary.vue'
 import FlowCanvas from '../components/FlowCanvas.vue'
 import PropertyPanel from '../components/PropertyPanel.vue'
 import ExecutionPanel from '../components/ExecutionPanel.vue'
-import type { Workflow, RegisteredApi, TypedNode, Execution } from '../types/index.js'
+import type { Workflow, RegisteredApi, TypedNode, Execution, ExecutionLog, NodeExecutionState } from '../types/index.js'
 
 function isTypedNode(node: Node): node is TypedNode {
   return (
@@ -90,8 +90,8 @@ async function run() {
     if (!workflow.value.id) return
     const result = await workflowApi.execute(workflow.value.id, {})
     execution.value = result
-    if (result.id) {
-      subscribeExecutionEvents(result.id)
+    if (result.executionId) {
+      subscribeExecutionEvents(result.executionId)
     }
     ElMessage.success('运行成功')
   } catch (err) {
@@ -123,7 +123,7 @@ function subscribeExecutionEvents(executionId: number) {
       if (event.type === 'connected') return
       applyExecutionEvent(event)
     } catch {
-      // ignore malformed events
+      console.warn('Received malformed SSE message:', message.data)
     }
   }
   eventSource.onerror = () => {
@@ -131,13 +131,26 @@ function subscribeExecutionEvents(executionId: number) {
   }
 }
 
-function applyExecutionEvent(event: { type: string; nodeId: string; data?: any }) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isValidExecutionEvent(event: unknown): event is { type: string; nodeId: string; data: unknown } {
+  if (!isRecord(event)) return false
+  return typeof event.type === 'string' && typeof event.nodeId === 'string'
+}
+
+function applyExecutionEvent(event: unknown) {
   if (!execution.value) return
-  if (event.type === 'log' && event.data) {
-    execution.value.logs.push(event.data)
-  } else if (event.type === 'state' && event.data) {
+  if (!isValidExecutionEvent(event)) {
+    console.warn('Ignoring invalid execution event:', event)
+    return
+  }
+  if (event.type === 'log' && isRecord(event.data)) {
+    execution.value.logs.push(event.data as unknown as ExecutionLog)
+  } else if (event.type === 'state' && isRecord(event.data)) {
     if (!execution.value.context[event.nodeId]) {
-      execution.value.context[event.nodeId] = event.data
+      execution.value.context[event.nodeId] = event.data as unknown as NodeExecutionState
     } else {
       Object.assign(execution.value.context[event.nodeId], event.data)
     }
