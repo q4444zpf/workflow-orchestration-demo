@@ -54,7 +54,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiApi } from '../api/index.js'
-import { RegisteredApi } from '../../server/src/types/index.js'
+import type { RegisteredApi } from '../types/index.js'
 
 interface ApiForm {
   name: string

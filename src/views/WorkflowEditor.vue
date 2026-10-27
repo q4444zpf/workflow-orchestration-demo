@@ -27,9 +27,7 @@ import { apiApi, workflowApi } from '../api/index.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import FlowCanvas from '../components/FlowCanvas.vue'
 import PropertyPanel from '../components/PropertyPanel.vue'
-import { Workflow, RegisteredApi } from '../../server/src/types/index.js'
-
-type TypedNode = Node & { type: string; data: Record<string, unknown> }
+import type { Workflow, RegisteredApi, TypedNode } from '../types/index.js'
 
 function isTypedNode(node: Node): node is TypedNode {
   return (

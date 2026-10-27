@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { RegisteredApi, Workflow } from '../../server/src/types/index.js'
+import type { RegisteredApi, Workflow } from '../types/index.js'
 
 const client = axios.create({ baseURL: '/api' })
 

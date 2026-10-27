@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { RegisteredApi } from '../../server/src/types/index.js'
+import type { RegisteredApi } from '../types/index.js'
 
 defineProps<{ apis: RegisteredApi[] }>()
 
