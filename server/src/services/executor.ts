@@ -147,6 +147,112 @@ export async function executeWorkflow(
     }
   }
 
+  async function executeNode(node: FlowNode, input: any, ctx: any): Promise<any> {
+    switch (node.type) {
+      case 'start':
+        return node.data.inputMapping ? mapValues(node.data.inputMapping, ctx) : input
+      case 'end':
+        return node.data.resultExpression ? evaluatePath(node.data.resultExpression, ctx) : input
+      case 'http':
+        return callHttpApi({
+          method: node.data.method || 'GET',
+          url: node.data.url,
+          headers: node.data.headers || {},
+          body: node.data.body,
+          timeout: node.data.timeout || 30000
+        }, ctx)
+      case 'python': {
+        const pythonInputs: Record<string, any> = {}
+        if (node.data.inputMapping) {
+          for (const [varName, expr] of Object.entries(node.data.inputMapping)) {
+            pythonInputs[varName] = evaluatePath(expr as string, ctx)
+          }
+        }
+        const result = await runPythonCode(node.data.code, pythonInputs)
+        if (!result.success) throw new Error(result.error)
+        const output: Record<string, any> = {}
+        if (node.data.outputMapping) {
+          for (const [key, varName] of Object.entries(node.data.outputMapping)) {
+            output[key] = varName === node.data.outputVar ? result.output : undefined
+          }
+        }
+        return output
+      }
+      case 'branch':
+        return evaluateCondition(node.data.condition, ctx)
+      case 'loop':
+        return executeLoop(node, ctx)
+      case 'parallel':
+        return executeParallel(node, ctx)
+      default:
+        throw new Error(`Unknown node type: ${node.type}`)
+    }
+  }
+
+  function chooseNextEdge(node: FlowNode, edges: FlowEdge[], output: any): FlowEdge | undefined {
+    if (node.type === 'branch') {
+      return edges.find((e) => e.label === (output ? 'true' : 'false'))
+    }
+    if (node.type === 'parallel') {
+      return edges.find((e) => e.label === 'join')
+    }
+    if (node.type === 'loop') {
+      return edges.find((e) => e.label === 'next')
+    }
+    return edges[0]
+  }
+
+  async function executeLoop(node: FlowNode, ctx: any): Promise<any> {
+    const iterator = evaluatePath(node.data.iteratorExpression, ctx)
+    if (!Array.isArray(iterator)) throw new Error('Loop iterator must be an array')
+    const bodyEdge = edges.find((e) => e.source === node.id && e.label === 'body')
+    if (!bodyEdge) throw new Error('Loop node must have a body edge')
+
+    const results: any[] = []
+    for (const item of iterator) {
+      ctx.var.item = item
+      if (!ctx.ctx[node.id]) {
+        ctx.ctx[node.id] = { input: item, output: item, status: 'running' }
+      } else {
+        ctx.ctx[node.id].input = item
+        ctx.ctx[node.id].output = item
+      }
+
+      const lastNodeId = await visit(bodyEdge.target)
+      if (lastNodeId) {
+        results.push(ctx.ctx[lastNodeId]?.output)
+      }
+    }
+    return results
+  }
+
+  async function executeParallel(node: FlowNode, ctx: any): Promise<any> {
+    const forkEdges = edges
+      .filter((e) => e.source === node.id && e.label?.startsWith('fork-'))
+      .sort((a, b) => {
+        const ai = parseInt(a.label!.replace('fork-', ''), 10)
+        const bi = parseInt(b.label!.replace('fork-', ''), 10)
+        return ai - bi
+      })
+    if (forkEdges.length === 0) throw new Error('Parallel node must have at least one fork edge')
+
+    const lastNodeIds = await Promise.all(forkEdges.map((edge) => visit(edge.target)))
+    const outputs: Record<string, any> = {}
+    for (let i = 0; i < forkEdges.length; i++) {
+      const lastNodeId = lastNodeIds[i]
+      outputs[forkEdges[i].label!] = lastNodeId ? ctx.ctx[lastNodeId]?.output : undefined
+    }
+    return outputs
+  }
+
+  function mapValues(mapping: Record<string, string>, ctx: any): Record<string, any> {
+    const result: Record<string, any> = {}
+    for (const [key, expr] of Object.entries(mapping)) {
+      result[key] = evaluatePath(expr, ctx)
+    }
+    return result
+  }
+
   try {
     const endNodeId = await visit(startNode.id)
     execution.status = 'success'
@@ -160,83 +266,4 @@ export async function executeWorkflow(
 
   execution.ended_at = new Date().toISOString()
   return execution
-}
-
-async function executeNode(node: FlowNode, input: any, ctx: any): Promise<any> {
-  switch (node.type) {
-    case 'start':
-      return node.data.inputMapping ? mapValues(node.data.inputMapping, ctx) : input
-    case 'end':
-      return node.data.resultExpression ? evaluatePath(node.data.resultExpression, ctx) : input
-    case 'http':
-      return callHttpApi({
-        method: node.data.method || 'GET',
-        url: node.data.url,
-        headers: node.data.headers || {},
-        body: node.data.body,
-        timeout: node.data.timeout || 30000
-      }, ctx)
-    case 'python': {
-      const pythonInputs: Record<string, any> = {}
-      if (node.data.inputMapping) {
-        for (const [varName, expr] of Object.entries(node.data.inputMapping)) {
-          pythonInputs[varName] = evaluatePath(expr as string, ctx)
-        }
-      }
-      const result = await runPythonCode(node.data.code, pythonInputs)
-      if (!result.success) throw new Error(result.error)
-      const output: Record<string, any> = {}
-      if (node.data.outputMapping) {
-        for (const [key, varName] of Object.entries(node.data.outputMapping)) {
-          output[key] = varName === node.data.outputVar ? result.output : undefined
-        }
-      }
-      return output
-    }
-    case 'branch':
-      return evaluateCondition(node.data.condition, ctx)
-    case 'loop':
-      return executeLoop(node, ctx)
-    case 'parallel':
-      return executeParallel(node, ctx)
-    default:
-      throw new Error(`Unknown node type: ${node.type}`)
-  }
-}
-
-function chooseNextEdge(node: FlowNode, edges: FlowEdge[], output: any): FlowEdge | undefined {
-  if (node.type === 'branch') {
-    return edges.find((e) => e.label === (output ? 'true' : 'false'))
-  }
-  if (node.type === 'parallel') {
-    return edges.find((e) => e.label === 'join')
-  }
-  if (node.type === 'loop') {
-    return undefined // handled internally
-  }
-  return edges[0]
-}
-
-async function executeLoop(node: FlowNode, ctx: any): Promise<any> {
-  const iterator = evaluatePath(node.data.iteratorExpression, ctx)
-  if (!Array.isArray(iterator)) throw new Error('Loop iterator must be an array')
-  const results: any[] = []
-  for (const item of iterator) {
-    ctx.ctx[node.id] = { input: item, output: item, status: 'success' }
-    // simplified: loop body execution would traverse the body edge
-  }
-  return results
-}
-
-async function executeParallel(node: FlowNode, ctx: any): Promise<any> {
-  // Placeholder: full implementation traverses fork edges concurrently
-  return {}
-}
-
-function mapValues(mapping: Record<string, string>, ctx: any): Record<string, any> {
-  const result: Record<string, any> = {}
-  for (const [key, expr] of Object.entries(mapping)) {
-    result[key] = evaluatePath(expr, ctx)
-  }
-  return result
 }
