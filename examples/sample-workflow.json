@@ -1,0 +1,81 @@
+{
+  "name": "用户评分示例工作流",
+  "description": "根据 userId 调用 HTTP 接口获取参数，使用 Python 计算用户评分，并根据评分分支输出不同结果。",
+  "variables": [
+    {
+      "name": "userId",
+      "type": "string",
+      "default": "alice",
+      "description": "用户 ID，将拼接到 HTTP 请求参数中"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start1",
+      "type": "start",
+      "position": { "x": 80, "y": 200 },
+      "data": {
+        "inputMapping": {
+          "userId": "var.userId"
+        }
+      }
+    },
+    {
+      "id": "http1",
+      "type": "http",
+      "position": { "x": 280, "y": 200 },
+      "data": {
+        "method": "GET",
+        "url": "https://httpbin.org/get?userId={{var.userId}}",
+        "headers": {},
+        "timeout": 30000
+      }
+    },
+    {
+      "id": "py1",
+      "type": "python",
+      "position": { "x": 480, "y": 200 },
+      "data": {
+        "inputMapping": {
+          "response": "ctx.http1.output.data"
+        },
+        "code": "user_id = response.get('args', {}).get('userId', '')\nscore = min(len(user_id) * 20, 100)\nOUTPUT = {'userId': user_id, 'score': score}\n",
+        "outputMapping": {
+          "result": "OUTPUT"
+        },
+        "outputVar": "OUTPUT"
+      }
+    },
+    {
+      "id": "branch1",
+      "type": "branch",
+      "position": { "x": 680, "y": 200 },
+      "data": {
+        "condition": "ctx.py1.output.result.score >= 80"
+      }
+    },
+    {
+      "id": "end1",
+      "type": "end",
+      "position": { "x": 880, "y": 120 },
+      "data": {
+        "resultExpression": "ctx.py1.output.result"
+      }
+    },
+    {
+      "id": "end2",
+      "type": "end",
+      "position": { "x": 880, "y": 280 },
+      "data": {
+        "resultExpression": "ctx.py1.output.result"
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start1", "target": "http1" },
+    { "id": "e2", "source": "http1", "target": "py1" },
+    { "id": "e3", "source": "py1", "target": "branch1" },
+    { "id": "e4", "source": "branch1", "target": "end1", "label": "true" },
+    { "id": "e5", "source": "branch1", "target": "end2", "label": "false" }
+  ]
+}
