@@ -3,6 +3,7 @@ import { db } from '../db/index.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 import { HttpError } from '../middleware/errorHandler.js'
 import { validateId } from '../middleware/validation.js'
+import { registerExecutionConnection } from '../services/executionEvents.js'
 
 const router = Router()
 
@@ -19,15 +20,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
 }))
 
 router.get('/:id/events', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-
-  res.write('data: {"type":"connected"}\n\n')
-
-  req.on('close', () => {
-    res.end()
-  })
+  const id = validateId(req.params.id)
+  registerExecutionConnection(id, res)
 })
 
 export default router

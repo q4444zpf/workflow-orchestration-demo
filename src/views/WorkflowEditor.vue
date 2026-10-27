@@ -11,23 +11,25 @@
       <FlowCanvas
         v-model:nodes="workflow.nodes"
         v-model:edges="workflow.edges"
-        @node-click="selectedNode = isTypedNode($event.node) ? $event.node : null"
+        @node-click="onNodeClick"
       />
       <PropertyPanel v-model:node="selectedNode" :apis="apis" @update:node="onUpdateNode" />
+      <ExecutionPanel :execution="execution" :selected-node-id="selectedNodeId" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { Node } from '@vue-flow/core'
-import { apiApi, workflowApi } from '../api/index.js'
+import { apiApi, workflowApi, executionApi } from '../api/index.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import FlowCanvas from '../components/FlowCanvas.vue'
 import PropertyPanel from '../components/PropertyPanel.vue'
-import type { Workflow, RegisteredApi, TypedNode } from '../types/index.js'
+import ExecutionPanel from '../components/ExecutionPanel.vue'
+import type { Workflow, RegisteredApi, TypedNode, Execution } from '../types/index.js'
 
 function isTypedNode(node: Node): node is TypedNode {
   return (
@@ -44,8 +46,11 @@ const route = useRoute()
 const workflow = ref<Workflow>({ name: '新流程', nodes: [], edges: [] })
 const apis = ref<RegisteredApi[]>([])
 const selectedNode = ref<TypedNode | null>(null)
+const selectedNodeId = ref<string | null>(null)
 const saving = ref(false)
 const running = ref(false)
+const execution = ref<Execution | null>(null)
+let eventSource: EventSource | null = null
 
 onMounted(async () => {
   try {
@@ -83,7 +88,11 @@ async function run() {
   try {
     if (!workflow.value.id && !(await save())) return
     if (!workflow.value.id) return
-    await workflowApi.execute(workflow.value.id, {})
+    const result = await workflowApi.execute(workflow.value.id, {})
+    execution.value = result
+    if (result.id) {
+      subscribeExecutionEvents(result.id)
+    }
     ElMessage.success('运行成功')
   } catch (err) {
     ElMessage.error((err instanceof Error ? err.message : null) || '运行失败')
@@ -98,6 +107,53 @@ function onUpdateNode(node: TypedNode) {
     workflow.value.nodes[index] = node
   }
 }
+
+function onNodeClick(event: { node: Node }) {
+  const node = isTypedNode(event.node) ? event.node : null
+  selectedNode.value = node
+  selectedNodeId.value = node?.id ?? null
+}
+
+function subscribeExecutionEvents(executionId: number) {
+  closeEventSource()
+  eventSource = executionApi.events(executionId)
+  eventSource.onmessage = (message) => {
+    try {
+      const event = JSON.parse(message.data)
+      if (event.type === 'connected') return
+      applyExecutionEvent(event)
+    } catch {
+      // ignore malformed events
+    }
+  }
+  eventSource.onerror = () => {
+    closeEventSource()
+  }
+}
+
+function applyExecutionEvent(event: { type: string; nodeId: string; data?: any }) {
+  if (!execution.value) return
+  if (event.type === 'log' && event.data) {
+    execution.value.logs.push(event.data)
+  } else if (event.type === 'state' && event.data) {
+    if (!execution.value.context[event.nodeId]) {
+      execution.value.context[event.nodeId] = event.data
+    } else {
+      Object.assign(execution.value.context[event.nodeId], event.data)
+    }
+  }
+}
+
+function closeEventSource() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+}
+
+onUnmounted(() => {
+  closeEventSource()
+})
 </script>
 
 <style scoped>

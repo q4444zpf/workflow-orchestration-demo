@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { db, getWorkflow } from '../db/index.js'
 import { executeWorkflow } from '../services/executor.js'
+import { emitExecutionEvent } from '../services/executionEvents.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 import { HttpError } from '../middleware/errorHandler.js'
 import { validateId, validateWorkflow } from '../middleware/validation.js'
@@ -59,20 +60,39 @@ router.post('/:id/execute', asyncHandler(async (req, res) => {
     edges: JSON.parse(row.edges)
   }
   const variables = req.body.variables || {}
-  const execution = await executeWorkflow(workflow, variables)
-  const info = await db.prepare(`
+  const startedAt = new Date().toISOString()
+  const insertInfo = await db.prepare(`
     INSERT INTO executions (workflow_id, status, context, logs, result, started_at, ended_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run([
-    execution.workflow_id,
+    workflow.id,
+    'running',
+    JSON.stringify({}),
+    JSON.stringify([]),
+    JSON.stringify(null),
+    startedAt,
+    null
+  ])
+  const executionId = insertInfo.lastID
+
+  const execution = await executeWorkflow(workflow, variables, (event) => {
+    emitExecutionEvent(executionId, event)
+  })
+
+  await db.prepare(`
+    UPDATE executions
+    SET status=?, context=?, logs=?, result=?, ended_at=?
+    WHERE id=?
+  `).run([
     execution.status,
     JSON.stringify(execution.context),
     JSON.stringify(execution.logs),
     JSON.stringify(execution.result),
-    execution.started_at || new Date().toISOString(),
-    execution.ended_at
+    execution.ended_at,
+    executionId
   ])
-  res.json({ executionId: info.lastID, ...execution })
+
+  res.json({ executionId, ...execution })
 }))
 
 export default router

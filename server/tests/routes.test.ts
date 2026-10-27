@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import supertest from 'supertest'
+import http from 'http'
 
 process.env.DB_PATH = ':memory:'
 
@@ -107,6 +108,90 @@ describe('REST routes', () => {
     it('returns 404 when deleting a non-existent record', async () => {
       const res = await supertest(app).delete('/api/apis/999').expect(404)
       expect(res.body).toMatchObject({ status: 404 })
+    })
+  })
+
+  describe('POST /api/workflows/:id/execute', () => {
+    it('returns executionId and execution result', async () => {
+      const workflow = {
+        name: 'executable workflow',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: { inputMapping: { value: 'var.x' } } },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      const res = await supertest(app)
+        .post(`/api/workflows/${created.body.id}/execute`)
+        .send({ variables: { x: 42 } })
+        .expect(200)
+
+      expect(res.body).toHaveProperty('executionId')
+      expect(typeof res.body.executionId).toBe('number')
+      expect(res.body.status).toBe('success')
+      expect(res.body.context.start.output.value).toBe(42)
+    })
+  })
+
+  describe('GET /api/executions/:id/events', () => {
+    it('streams execution events via SSE', async () => {
+      const workflow = {
+        name: 'sse workflow',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: { inputMapping: { value: 'var.x' } } },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      const executed = await supertest(app)
+        .post(`/api/workflows/${created.body.id}/execute`)
+        .send({ variables: { x: 42 } })
+        .expect(200)
+
+      const executionId = executed.body.executionId
+      const server = app.listen(0)
+      const { port } = server.address() as { port: number }
+
+      const events: string[] = []
+      await new Promise<void>((resolve, reject) => {
+        const req = http.get(`http://127.0.0.1:${port}/api/executions/${executionId}/events`, (res) => {
+          res.on('data', (chunk: Buffer) => {
+            events.push(chunk.toString())
+            const text = events.join('')
+            if (text.includes('"type":"state"') && text.includes('"type":"log"')) {
+              req.destroy()
+              server.close()
+              resolve()
+            }
+          })
+          res.on('end', () => {
+            server.close()
+            resolve()
+          })
+          res.on('error', (err) => {
+            server.close()
+            reject(err)
+          })
+        })
+        req.on('error', () => {
+          server.close()
+          resolve()
+        })
+        setTimeout(() => {
+          req.destroy()
+          server.close()
+          resolve()
+        }, 2000)
+      })
+
+      const text = events.join('')
+      expect(text).toContain('"type":"connected"')
+      expect(text).toContain('"type":"state"')
+      expect(text).toContain('"type":"log"')
     })
   })
 })
