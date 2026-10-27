@@ -135,6 +135,133 @@ describe('REST routes', () => {
     })
   })
 
+  describe('POST /api/workflows/:id/publish', () => {
+    it('publishes a workflow with a URL-safe path', async () => {
+      const workflow = {
+        name: 'publishable workflow',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: {} },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      const res = await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: 'my-workflow_1' })
+        .expect(200)
+
+      expect(res.body.is_published).toBe(true)
+      expect(res.body.publish_path).toBe('my-workflow_1')
+    })
+
+    it('rejects an empty or non-URL-safe publish path', async () => {
+      const workflow = {
+        name: 'unpublishable workflow',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: {} },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      const empty = await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: '  ' })
+        .expect(400)
+      expect(empty.body.message).toContain('publish_path')
+
+      const unsafe = await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: 'a/b' })
+        .expect(400)
+      expect(unsafe.body.message).toContain('URL-safe')
+    })
+  })
+
+  describe('POST /api/workflows/:id/unpublish', () => {
+    it('unpublishes a workflow and clears the publish path', async () => {
+      const workflow = {
+        name: 'to unpublish',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: {} },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: 'temp-path' })
+        .expect(200)
+
+      const res = await supertest(app)
+        .post(`/api/workflows/${created.body.id}/unpublish`)
+        .expect(200)
+
+      expect(res.body.is_published).toBe(false)
+      expect(res.body.publish_path).toBeNull()
+    })
+  })
+
+  describe('POST /api/run/:publish_path', () => {
+    it('executes a published workflow with the provided variables', async () => {
+      const workflow = {
+        name: 'public workflow',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: { inputMapping: { value: 'var.x' } } },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: 'public-run' })
+        .expect(200)
+
+      const res = await supertest(app)
+        .post('/api/run/public-run')
+        .send({ x: 42 })
+        .expect(200)
+
+      expect(res.body).toHaveProperty('executionId')
+      expect(typeof res.body.executionId).toBe('number')
+      expect(res.body.status).toBe('success')
+      expect(res.body.context.start.output.value).toBe(42)
+    })
+
+    it('returns 404 for an unpublished workflow', async () => {
+      const workflow = {
+        name: 'private workflow',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: {} },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: 'then-unpublish' })
+        .expect(200)
+      await supertest(app)
+        .post(`/api/workflows/${created.body.id}/unpublish`)
+        .expect(200)
+
+      const res = await supertest(app)
+        .post('/api/run/then-unpublish')
+        .send({})
+        .expect(404)
+      expect(res.body.message).toContain('not found')
+    })
+  })
+
   describe('GET /api/executions/:id/events', () => {
     it('streams execution events via SSE', async () => {
       const workflow = {

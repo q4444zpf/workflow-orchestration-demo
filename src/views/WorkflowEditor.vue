@@ -5,6 +5,34 @@
       <el-input v-model="workflow.name" placeholder="流程名称" style="width: 200px" />
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       <el-button :loading="running" @click="run">运行</el-button>
+      <div class="publish-section">
+        <el-input
+          v-model="publishPath"
+          placeholder="发布路径"
+          style="width: 180px"
+          :disabled="workflow.is_published"
+        />
+        <el-button
+          v-if="!workflow.is_published"
+          type="success"
+          :loading="publishing"
+          :disabled="!publishPath.trim()"
+          @click="publish"
+        >
+          发布
+        </el-button>
+        <el-button
+          v-else
+          type="danger"
+          :loading="publishing"
+          @click="unpublish"
+        >
+          取消发布
+        </el-button>
+        <span v-if="workflow.is_published && workflow.publish_path" class="publish-status">
+          已发布: /api/run/{{ workflow.publish_path }}
+        </span>
+      </div>
     </div>
     <div class="editor-body">
       <NodeLibrary :apis="apis" />
@@ -49,7 +77,9 @@ const selectedNode = ref<TypedNode | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const saving = ref(false)
 const running = ref(false)
+const publishing = ref(false)
 const execution = ref<Execution | null>(null)
+const publishPath = ref('')
 let eventSource: EventSource | null = null
 
 onMounted(async () => {
@@ -58,6 +88,7 @@ onMounted(async () => {
     const id = route.params.id
     if (id) {
       workflow.value = await workflowApi.get(Number(id))
+      publishPath.value = workflow.value.publish_path || ''
     }
   } catch (err) {
     ElMessage.error((err instanceof Error ? err.message : null) || '加载数据失败')
@@ -98,6 +129,41 @@ async function run() {
     ElMessage.error((err instanceof Error ? err.message : null) || '运行失败')
   } finally {
     running.value = false
+  }
+}
+
+async function publish() {
+  if (!workflow.value.id) {
+    ElMessage.error('请先保存工作流')
+    return
+  }
+  publishing.value = true
+  try {
+    const updated = await workflowApi.publish(workflow.value.id, publishPath.value.trim())
+    workflow.value.is_published = updated.is_published
+    workflow.value.publish_path = updated.publish_path
+    publishPath.value = updated.publish_path || ''
+    ElMessage.success('发布成功')
+  } catch (err) {
+    ElMessage.error((err instanceof Error ? err.message : null) || '发布失败')
+  } finally {
+    publishing.value = false
+  }
+}
+
+async function unpublish() {
+  if (!workflow.value.id) return
+  publishing.value = true
+  try {
+    const updated = await workflowApi.unpublish(workflow.value.id)
+    workflow.value.is_published = updated.is_published
+    workflow.value.publish_path = updated.publish_path
+    publishPath.value = ''
+    ElMessage.success('已取消发布')
+  } catch (err) {
+    ElMessage.error((err instanceof Error ? err.message : null) || '取消发布失败')
+  } finally {
+    publishing.value = false
   }
 }
 
@@ -171,6 +237,8 @@ onUnmounted(() => {
 
 <style scoped>
 .workflow-editor { display: flex; flex-direction: column; height: 100vh; }
-.toolbar { padding: 8px 16px; border-bottom: 1px solid #dcdfe6; display: flex; gap: 8px; }
+.toolbar { padding: 8px 16px; border-bottom: 1px solid #dcdfe6; display: flex; gap: 8px; align-items: center; }
+.publish-section { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.publish-status { color: #67c23a; font-size: 12px; }
 .editor-body { flex: 1; display: flex; overflow: hidden; }
 </style>
