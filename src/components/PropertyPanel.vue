@@ -37,7 +37,7 @@
         </template>
 
         <template v-if="node.type === 'python'">
-          <el-form-item label="输入变量">
+          <el-form-item label="Python 输入变量名">
             <el-input v-model="localData.inputVars" placeholder="INPUT" />
           </el-form-item>
           <el-form-item label="输出变量">

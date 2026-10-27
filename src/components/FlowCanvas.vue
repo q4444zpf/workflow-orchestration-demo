@@ -6,6 +6,7 @@
       :node-types="nodeTypes"
       fit-view-on-init
       @node-click="onNodeClick"
+      @edge-click="onEdgeClick"
     >
       <Background />
       <Controls />
@@ -18,7 +19,7 @@ import { shallowRef, watch, markRaw } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import type { Node, Edge, NodeTypesObject, NodeComponent, NodeMouseEvent } from '@vue-flow/core'
+import type { Node, Edge, NodeTypesObject, NodeComponent, NodeMouseEvent, EdgeMouseEvent } from '@vue-flow/core'
 import type { RegisteredApi } from '../types/index.js'
 import StartNode from './nodes/StartNode.vue'
 import EndNode from './nodes/EndNode.vue'
@@ -29,7 +30,7 @@ import LoopNode from './nodes/LoopNode.vue'
 import ParallelNode from './nodes/ParallelNode.vue'
 
 const props = defineProps<{ nodes: Node[]; edges: Edge[] }>()
-const emit = defineEmits(['update:nodes', 'update:edges', 'node-click'])
+const emit = defineEmits(['update:nodes', 'update:edges', 'node-click', 'edge-click'])
 
 const nodeTypes: NodeTypesObject = {
   start: markRaw(StartNode) as NodeComponent,
@@ -92,6 +93,10 @@ function onDrop(event: DragEvent) {
 
 function onNodeClick(event: NodeMouseEvent) {
   emit('node-click', event.node)
+}
+
+function onEdgeClick(event: EdgeMouseEvent) {
+  emit('edge-click', event.edge)
 }
 </script>
 

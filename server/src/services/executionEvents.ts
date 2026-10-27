@@ -15,11 +15,31 @@ const connections = new Map<number, Set<Connection>>()
 const buffers = new Map<number, ExecutionEvent[]>()
 const BUFFER_LIMIT = 1000
 
+function writeEvent(res: Response, event: ExecutionEvent | string): boolean {
+  try {
+    const payload = typeof event === 'string' ? `${event}\n\n` : `data: ${JSON.stringify(event)}\n\n`
+    return res.write(payload)
+  } catch {
+    return false
+  }
+}
+
+function removeConnection(executionId: number, connection: Connection) {
+  clearInterval(connection.heartbeat)
+  const set = connections.get(executionId)
+  if (set) {
+    set.delete(connection)
+    if (set.size === 0) {
+      connections.delete(executionId)
+    }
+  }
+}
+
 function flushBuffer(executionId: number, res: Response) {
   const buffer = buffers.get(executionId)
   if (!buffer) return
   for (const event of buffer) {
-    res.write(`data: ${JSON.stringify(event)}\n\n`)
+    writeEvent(res, event)
   }
 }
 
@@ -35,7 +55,7 @@ export function emitExecutionEvent(executionId: number, event: ExecutionEvent) {
   const connectionSet = connections.get(executionId)
   if (connectionSet) {
     for (const connection of connectionSet) {
-      connection.res.write(`data: ${JSON.stringify(event)}\n\n`)
+      writeEvent(connection.res, event)
     }
   }
 }
@@ -45,11 +65,11 @@ export function registerExecutionConnection(executionId: number, res: Response) 
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
 
-  res.write('data: {"type":"connected"}\n\n')
+  writeEvent(res, { type: 'connected', nodeId: '' })
   flushBuffer(executionId, res)
 
   const heartbeat = setInterval(() => {
-    res.write(':heartbeat\n\n')
+    writeEvent(res, ':heartbeat')
   }, 15000)
 
   const connection: Connection = { res, heartbeat }
@@ -60,15 +80,12 @@ export function registerExecutionConnection(executionId: number, res: Response) 
     connections.set(executionId, new Set([connection]))
   }
 
+  res.on('error', () => {
+    removeConnection(executionId, connection)
+  })
+
   res.on('close', () => {
-    clearInterval(heartbeat)
-    const set = connections.get(executionId)
-    if (set) {
-      set.delete(connection)
-      if (set.size === 0) {
-        connections.delete(executionId)
-      }
-    }
+    removeConnection(executionId, connection)
   })
 }
 

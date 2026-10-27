@@ -43,8 +43,7 @@ export async function callHttpApi(config: HttpConfig, context: any): Promise<Htt
     method: config.method,
     url,
     headers,
-    timeout: config.timeout || 30000,
-    validateStatus: () => true
+    timeout: config.timeout || 30000
   }
 
   if (body !== undefined && config.method !== 'GET') {
@@ -71,8 +70,12 @@ export async function callHttpApi(config: HttpConfig, context: any): Promise<Htt
     }
   } catch (err: any) {
     const response = err?.response
-    throw new HttpProxyError(err?.message || 'HTTP request failed', {
-      status: response?.status,
+    const status = response?.status
+    const message = status
+      ? `HTTP request failed: ${status}`
+      : (err?.message || 'HTTP request failed')
+    throw new HttpProxyError(message, {
+      status,
       data: response?.data,
       cause: err
     })

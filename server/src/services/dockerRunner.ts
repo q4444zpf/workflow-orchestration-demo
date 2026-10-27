@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -21,16 +21,37 @@ function dockerEnv(): NodeJS.ProcessEnv {
   }
 }
 
+async function stopAndRemoveContainer(cidFile: string) {
+  if (!existsSync(cidFile)) return
+  try {
+    const cid = readFileSync(cidFile, 'utf-8').trim()
+    if (!cid) return
+    await new Promise<void>((resolve) => {
+      const stop = spawn('docker', ['stop', '--time', '0', cid], { env: dockerEnv() })
+      stop.on('close', () => {
+        const rm = spawn('docker', ['rm', cid], { env: dockerEnv() })
+        rm.on('close', () => resolve())
+        rm.on('error', () => resolve())
+      })
+      stop.on('error', () => resolve())
+    })
+  } catch {
+    // Best-effort cleanup; ignore failures.
+  }
+}
+
 export async function runPythonCode(code: string, inputs: Record<string, any>): Promise<PythonResult> {
   await ensureImage()
 
   const taskDir = mkdtempSync(join(tmpdir(), 'wf-python-'))
+  const cidFile = join(taskDir, 'container.cid')
   writeFileSync(join(taskDir, 'inputs.json'), JSON.stringify(inputs))
   writeFileSync(join(taskDir, 'code.py'), code)
 
   return new Promise((resolve, reject) => {
     const args = [
-      'run', '--rm',
+      'run',
+      '--cidfile', cidFile,
       '--network', 'none',
       '--read-only',
       '--memory', '128m',
@@ -42,17 +63,26 @@ export async function runPythonCode(code: string, inputs: Record<string, any>): 
     const proc = spawn('docker', args, { timeout: TIMEOUT_MS, env: dockerEnv() })
     let stdout = ''
     let stderr = ''
+    let cleanedUp = false
+
+    function cleanup() {
+      if (cleanedUp) return
+      cleanedUp = true
+      try { rmSync(taskDir, { recursive: true, force: true }) } catch {}
+    }
 
     proc.stdout.on('data', (data) => { stdout += data.toString() })
     proc.stderr.on('data', (data) => { stderr += data.toString() })
 
-    proc.on('error', (err) => {
-      try { rmSync(taskDir, { recursive: true, force: true }) } catch {}
+    proc.on('error', async (err) => {
+      await stopAndRemoveContainer(cidFile)
+      cleanup()
       reject(err)
     })
 
-    proc.on('close', (code) => {
-      try { rmSync(taskDir, { recursive: true, force: true }) } catch {}
+    proc.on('close', async (code) => {
+      await stopAndRemoveContainer(cidFile)
+      cleanup()
 
       const match = stdout.match(/__RESULT_START__\r?\n([\s\S]+?)\r?\n__RESULT_END__/)
       if (match) {

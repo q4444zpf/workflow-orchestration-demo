@@ -70,20 +70,43 @@ describe('callHttpApi', () => {
     expect(result.status).toBe(201)
   })
 
-  it('returns non-2xx responses without throwing', async () => {
-    mockedAxios.mockResolvedValue({
+  it('throws a structured error for non-2xx responses', async () => {
+    const notFoundError = new Error('Request failed with status code 404')
+    ;(notFoundError as any).response = {
       status: 404,
       data: { error: 'not found' },
       headers: {}
-    })
+    }
+    mockedAxios.mockRejectedValue(notFoundError)
 
-    const result = await callHttpApi(
-      { method: 'GET', url: 'https://example.com' },
-      {}
-    )
+    try {
+      await callHttpApi({ method: 'GET', url: 'https://example.com' }, {})
+      throw new Error('expected callHttpApi to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpProxyError)
+      expect((err as HttpProxyError).message).toBe('HTTP request failed: 404')
+      expect((err as HttpProxyError).status).toBe(404)
+      expect((err as HttpProxyError).data).toEqual({ error: 'not found' })
+    }
+  })
 
-    expect(result.status).toBe(404)
-    expect(result.data).toEqual({ error: 'not found' })
+  it('throws a structured error for non-2xx responses without message', async () => {
+    const notFoundError = new Error('')
+    ;(notFoundError as any).response = {
+      status: 500,
+      data: { error: 'server error' },
+      headers: {}
+    }
+    mockedAxios.mockRejectedValue(notFoundError)
+
+    try {
+      await callHttpApi({ method: 'GET', url: 'https://example.com' }, {})
+      throw new Error('expected callHttpApi to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpProxyError)
+      expect((err as HttpProxyError).message).toBe('HTTP request failed: 500')
+      expect((err as HttpProxyError).status).toBe(500)
+    }
   })
 
   it('throws a structured error when axios rejects with a network/timeout error', async () => {

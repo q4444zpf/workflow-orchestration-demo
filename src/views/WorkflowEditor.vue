@@ -33,6 +33,16 @@
           已发布: /api/run/{{ workflow.publish_path }}
         </span>
       </div>
+      <div v-if="selectedEdge" class="edge-editor">
+        <span class="edge-editor-label">边标签</span>
+        <el-input
+          v-model="selectedEdge.label"
+          placeholder="true / false / body / next / fork-N / join"
+          style="width: 220px"
+          @change="onUpdateEdgeLabel"
+        />
+        <el-button text @click="selectedEdge = null">取消选择</el-button>
+      </div>
     </div>
     <div class="editor-body">
       <NodeLibrary :apis="apis" />
@@ -40,6 +50,7 @@
         v-model:nodes="workflow.nodes"
         v-model:edges="workflow.edges"
         @node-click="onNodeClick"
+        @edge-click="onEdgeClick"
       />
       <PropertyPanel v-model:node="selectedNode" :apis="apis" @update:node="onUpdateNode" />
       <ExecutionPanel :execution="execution" :selected-node-id="selectedNodeId" />
@@ -50,14 +61,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Node } from '@vue-flow/core'
 import { apiApi, workflowApi, executionApi } from '../api/index.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import FlowCanvas from '../components/FlowCanvas.vue'
 import PropertyPanel from '../components/PropertyPanel.vue'
 import ExecutionPanel from '../components/ExecutionPanel.vue'
-import type { Workflow, RegisteredApi, TypedNode, Execution, ExecutionLog, NodeExecutionState } from '../types/index.js'
+import type { Workflow, RegisteredApi, TypedNode, FlowEdge, Execution, ExecutionLog, NodeExecutionState } from '../types/index.js'
 
 function isTypedNode(node: Node): node is TypedNode {
   return (
@@ -75,11 +86,13 @@ const workflow = ref<Workflow>({ name: '新流程', nodes: [], edges: [] })
 const apis = ref<RegisteredApi[]>([])
 const selectedNode = ref<TypedNode | null>(null)
 const selectedNodeId = ref<string | null>(null)
+const selectedEdge = ref<FlowEdge | null>(null)
 const saving = ref(false)
 const running = ref(false)
 const publishing = ref(false)
 const execution = ref<Execution | null>(null)
 const publishPath = ref('')
+const variablesInput = ref('{}')
 const isPublishPathValid = computed(() => {
   const trimmed = publishPath.value.trim()
   return trimmed.length > 0 && /^[a-zA-Z0-9_.~_-]+$/.test(trimmed)
@@ -123,13 +136,44 @@ async function run() {
   try {
     if (!workflow.value.id && !(await save())) return
     if (!workflow.value.id) return
-    const result = await workflowApi.execute(workflow.value.id, {})
-    execution.value = result
-    if (result.executionId) {
-      subscribeExecutionEvents(result.executionId)
+
+    const { value } = await ElMessageBox.prompt('请输入工作流变量（JSON 对象）', '运行变量', {
+      confirmButtonText: '运行',
+      cancelButtonText: '取消',
+      inputValue: variablesInput.value,
+      inputValidator: (value) => {
+        try {
+          JSON.parse(value)
+          return true
+        } catch {
+          return '请输入合法的 JSON 对象'
+        }
+      }
+    })
+
+    let variables: Record<string, any> = {}
+    try {
+      variables = JSON.parse(value || '{}')
+      variablesInput.value = value || '{}'
+    } catch (err) {
+      ElMessage.error('变量 JSON 解析失败')
+      return
     }
+
+    const result = await workflowApi.execute(workflow.value.id, variables)
+    execution.value = {
+      id: result.executionId,
+      workflow_id: workflow.value.id,
+      status: 'running',
+      context: {},
+      logs: [],
+      result: null,
+      started_at: new Date().toISOString()
+    }
+    subscribeExecutionEvents(result.executionId)
     ElMessage.success('运行成功')
   } catch (err) {
+    if ((err as any)?.action === 'cancel') return
     ElMessage.error((err instanceof Error ? err.message : null) || '运行失败')
   } finally {
     running.value = false
@@ -182,6 +226,21 @@ function onNodeClick(event: { node: Node }) {
   const node = isTypedNode(event.node) ? event.node : null
   selectedNode.value = node
   selectedNodeId.value = node?.id ?? null
+  selectedEdge.value = null
+}
+
+function onEdgeClick(edge: FlowEdge) {
+  selectedEdge.value = edge
+  selectedNode.value = null
+  selectedNodeId.value = null
+}
+
+function onUpdateEdgeLabel() {
+  if (!selectedEdge.value) return
+  const index = workflow.value.edges.findIndex((e) => e.id === selectedEdge.value!.id)
+  if (index !== -1) {
+    workflow.value.edges[index] = { ...selectedEdge.value }
+  }
 }
 
 function subscribeExecutionEvents(executionId: number) {
@@ -244,5 +303,7 @@ onUnmounted(() => {
 .toolbar { padding: 8px 16px; border-bottom: 1px solid #dcdfe6; display: flex; gap: 8px; align-items: center; }
 .publish-section { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .publish-status { color: #67c23a; font-size: 12px; }
+.edge-editor { margin-left: 8px; display: flex; gap: 8px; align-items: center; }
+.edge-editor-label { font-size: 13px; color: #606266; white-space: nowrap; }
 .editor-body { flex: 1; display: flex; overflow: hidden; }
 </style>

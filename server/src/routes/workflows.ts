@@ -76,8 +76,8 @@ router.post('/:id/execute', asyncHandler(async (req, res) => {
   const row = await getWorkflow(id)
   if (!row) throw new HttpError(404, 'Workflow not found')
   const variables = req.body.variables || {}
-  const result = await persistAndExecuteWorkflow(row, variables)
-  res.json(result)
+  const executionId = await persistAndExecuteWorkflow(row, variables)
+  res.json({ executionId })
 }))
 
 router.post('/:id/publish', asyncHandler(async (req, res) => {
@@ -126,27 +126,43 @@ async function persistAndExecuteWorkflow(row: NonNullable<Awaited<ReturnType<typ
     startedAt,
     null
   ])
-  const executionId = insertInfo.lastID
+  const executionId = insertInfo.lastID as number
 
-  const execution = await executeWorkflow(workflow, variables, (event) => {
-    emitExecutionEvent(executionId, event)
+  setImmediate(async () => {
+    try {
+      const execution = await executeWorkflow(workflow, variables, (event) => {
+        emitExecutionEvent(executionId, event)
+      })
+
+      await db.prepare(`
+        UPDATE executions
+        SET status=?, context=?, logs=?, result=?, ended_at=?
+        WHERE id=?
+      `).run([
+        execution.status,
+        JSON.stringify(execution.context),
+        JSON.stringify(execution.logs),
+        JSON.stringify(execution.result),
+        execution.ended_at,
+        executionId
+      ])
+    } catch (err: any) {
+      await db.prepare(`
+        UPDATE executions
+        SET status=?, logs=?, ended_at=?
+        WHERE id=?
+      `).run([
+        'failed',
+        JSON.stringify([{ time: new Date().toISOString(), nodeId: '', level: 'error', message: err.message }]),
+        new Date().toISOString(),
+        executionId
+      ])
+    } finally {
+      clearExecutionBuffer(executionId)
+    }
   })
 
-  await db.prepare(`
-    UPDATE executions
-    SET status=?, context=?, logs=?, result=?, ended_at=?
-    WHERE id=?
-  `).run([
-    execution.status,
-    JSON.stringify(execution.context),
-    JSON.stringify(execution.logs),
-    JSON.stringify(execution.result),
-    execution.ended_at,
-    executionId
-  ])
-  clearExecutionBuffer(executionId)
-
-  return { executionId, ...execution }
+  return executionId
 }
 
 runRouter.post('/:publish_path', asyncHandler(async (req, res) => {
@@ -155,8 +171,8 @@ runRouter.post('/:publish_path', asyncHandler(async (req, res) => {
     .get<NonNullable<Awaited<ReturnType<typeof getWorkflow>>>>(publishPath)
   if (!row) throw new HttpError(404, 'Published workflow not found')
   const variables = req.body || {}
-  const result = await persistAndExecuteWorkflow(row, variables)
-  res.json(result)
+  const executionId = await persistAndExecuteWorkflow(row, variables)
+  res.json({ executionId })
 }))
 
 export default router

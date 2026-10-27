@@ -14,6 +14,17 @@ beforeAll(async () => {
   app = createApp()
 })
 
+async function waitForExecution(id: number): Promise<Record<string, any>> {
+  for (let i = 0; i < 50; i++) {
+    const res = await supertest(app).get(`/api/executions/${id}`).expect(200)
+    if (res.body.status !== 'running') {
+      return res.body
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error(`Execution ${id} did not finish in time`)
+}
+
 describe('REST routes', () => {
   describe('GET /api/apis', () => {
     it('returns an empty list initially', async () => {
@@ -112,7 +123,7 @@ describe('REST routes', () => {
   })
 
   describe('POST /api/workflows/:id/execute', () => {
-    it('returns executionId and execution result', async () => {
+    it('returns executionId immediately and finishes asynchronously', async () => {
       const workflow = {
         name: 'executable workflow',
         nodes: [
@@ -130,8 +141,11 @@ describe('REST routes', () => {
 
       expect(res.body).toHaveProperty('executionId')
       expect(typeof res.body.executionId).toBe('number')
-      expect(res.body.status).toBe('success')
-      expect(res.body.context.start.output.value).toBe(42)
+      expect(res.body).not.toHaveProperty('status')
+
+      const execution = await waitForExecution(res.body.executionId)
+      expect(execution.status).toBe('success')
+      expect(execution.context.start.output.value).toBe(42)
     })
   })
 
@@ -280,8 +294,11 @@ describe('REST routes', () => {
 
       expect(res.body).toHaveProperty('executionId')
       expect(typeof res.body.executionId).toBe('number')
-      expect(res.body.status).toBe('success')
-      expect(res.body.context.start.output.value).toBe(42)
+      expect(res.body).not.toHaveProperty('status')
+
+      const execution = await waitForExecution(res.body.executionId)
+      expect(execution.status).toBe('success')
+      expect(execution.context.start.output.value).toBe(42)
     })
 
     it('returns 404 for an unpublished workflow', async () => {
@@ -317,9 +334,23 @@ describe('REST routes', () => {
         name: 'sse workflow',
         nodes: [
           { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: { inputMapping: { value: 'var.x' } } },
-          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+          {
+            id: 'slow',
+            type: 'python',
+            position: { x: 100, y: 0 },
+            data: {
+              inputMapping: { value: 'var.x' },
+              code: 'import time; time.sleep(0.3); OUTPUT = value',
+              outputMapping: { result: 'OUTPUT' },
+              outputVar: 'OUTPUT'
+            }
+          },
+          { id: 'end', type: 'end', position: { x: 200, y: 0 }, data: { resultExpression: 'ctx.slow.output.result' } }
         ],
-        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+        edges: [
+          { id: 'e1', source: 'start', target: 'slow' },
+          { id: 'e2', source: 'slow', target: 'end' }
+        ]
       }
 
       const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
@@ -361,13 +392,17 @@ describe('REST routes', () => {
           req.destroy()
           server.close()
           resolve()
-        }, 2000)
+        }, 3000)
       })
 
       const text = events.join('')
       expect(text).toContain('"type":"connected"')
-      expect(text).not.toContain('"type":"state"')
-      expect(text).not.toContain('"type":"log"')
-    })
+      expect(text).toContain('"type":"state"')
+      expect(text).toContain('"type":"log"')
+
+      const execution = await waitForExecution(executionId)
+      expect(execution.status).toBe('success')
+      expect(execution.result).toBe(42)
+    }, 30000)
   })
 })
