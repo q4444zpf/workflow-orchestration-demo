@@ -179,6 +179,55 @@ describe('REST routes', () => {
         .expect(400)
       expect(unsafe.body.message).toContain('URL-safe')
     })
+
+    it('returns 409 when another workflow already uses the publish path', async () => {
+      const base = {
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: {} },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const first = await supertest(app).post('/api/workflows').send({ name: 'first', ...base }).expect(201)
+      await supertest(app)
+        .post(`/api/workflows/${first.body.id}/publish`)
+        .send({ publish_path: 'shared-path' })
+        .expect(200)
+
+      const second = await supertest(app).post('/api/workflows').send({ name: 'second', ...base }).expect(201)
+      const res = await supertest(app)
+        .post(`/api/workflows/${second.body.id}/publish`)
+        .send({ publish_path: 'shared-path' })
+        .expect(409)
+
+      expect(res.body.message).toContain('already in use')
+    })
+
+    it('allows republishing the same workflow with the same path', async () => {
+      const workflow = {
+        name: 'republishable workflow',
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: {} },
+          { id: 'end', type: 'end', position: { x: 100, y: 0 }, data: {} }
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }]
+      }
+
+      const created = await supertest(app).post('/api/workflows').send(workflow).expect(201)
+      await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: 'same-path' })
+        .expect(200)
+
+      const res = await supertest(app)
+        .post(`/api/workflows/${created.body.id}/publish`)
+        .send({ publish_path: 'same-path' })
+        .expect(200)
+
+      expect(res.body.is_published).toBe(true)
+      expect(res.body.publish_path).toBe('same-path')
+    })
   })
 
   describe('POST /api/workflows/:id/unpublish', () => {

@@ -16,7 +16,7 @@
           v-if="!workflow.is_published"
           type="success"
           :loading="publishing"
-          :disabled="!publishPath.trim()"
+          :disabled="!isPublishPathValid"
           @click="publish"
         >
           发布
@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { Node } from '@vue-flow/core'
@@ -80,6 +80,10 @@ const running = ref(false)
 const publishing = ref(false)
 const execution = ref<Execution | null>(null)
 const publishPath = ref('')
+const isPublishPathValid = computed(() => {
+  const trimmed = publishPath.value.trim()
+  return trimmed.length > 0 && /^[a-zA-Z0-9_.~_-]+$/.test(trimmed)
+})
 let eventSource: EventSource | null = null
 
 onMounted(async () => {
