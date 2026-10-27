@@ -109,17 +109,15 @@ function openDatabase(path: string): Promise<sqlite3.Database> {
   })
 }
 
-let db!: WrappedDatabase
+export let db!: WrappedDatabase
 
-export async function init(): Promise<WrappedDatabase> {
+export async function initializeDb(): Promise<WrappedDatabase> {
   mkdirSync(dirname(dbPath), { recursive: true })
   const rawDb = await openDatabase(dbPath)
   db = new WrappedDatabase(rawDb)
   await db.exec(readFileSync(join(__dirname, 'schema.sql'), 'utf-8'))
   return db
 }
-
-export const ready: Promise<WrappedDatabase> = init()
 
 export async function getWorkflow(id: number): Promise<WorkflowRow | undefined> {
   return db.prepare('SELECT * FROM workflows WHERE id = ?').get<WorkflowRow>(id)
