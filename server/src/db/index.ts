@@ -20,12 +20,17 @@ export interface WorkflowRow {
   updated_at: string
 }
 
+export type WorkflowListItem = Pick<
+  WorkflowRow,
+  'id' | 'name' | 'description' | 'is_published' | 'publish_path' | 'updated_at'
+>
+
 class WrappedStatement {
   constructor(private stmt: sqlite3.Statement) {}
 
   run(params?: any): Promise<sqlite3.RunResult> {
     return new Promise((resolve, reject) => {
-      this.stmt.run(params, function (err) {
+      this.stmt.run(params ?? [], function (err) {
         if (err) reject(err)
         else resolve(this)
       })
@@ -34,7 +39,7 @@ class WrappedStatement {
 
   get<T>(params?: any): Promise<T | undefined> {
     return new Promise((resolve, reject) => {
-      this.stmt.get<T>(params, (err, row) => {
+      this.stmt.get<T>(params ?? [], (err, row) => {
         if (err) reject(err)
         else resolve(row)
       })
@@ -43,7 +48,7 @@ class WrappedStatement {
 
   all<T>(params?: any): Promise<T[]> {
     return new Promise((resolve, reject) => {
-      this.stmt.all<T>(params, (err, rows) => {
+      this.stmt.all<T>(params ?? [], (err, rows) => {
         if (err) reject(err)
         else resolve(rows ?? [])
       })
@@ -104,17 +109,24 @@ function openDatabase(path: string): Promise<sqlite3.Database> {
   })
 }
 
-mkdirSync(dirname(dbPath), { recursive: true })
-const rawDb = await openDatabase(dbPath)
-export const db = new WrappedDatabase(rawDb)
-await db.exec(readFileSync(join(__dirname, 'schema.sql'), 'utf-8'))
+let db!: WrappedDatabase
+
+export async function init(): Promise<WrappedDatabase> {
+  mkdirSync(dirname(dbPath), { recursive: true })
+  const rawDb = await openDatabase(dbPath)
+  db = new WrappedDatabase(rawDb)
+  await db.exec(readFileSync(join(__dirname, 'schema.sql'), 'utf-8'))
+  return db
+}
+
+export const ready: Promise<WrappedDatabase> = init()
 
 export async function getWorkflow(id: number): Promise<WorkflowRow | undefined> {
   return db.prepare('SELECT * FROM workflows WHERE id = ?').get<WorkflowRow>(id)
 }
 
-export async function listWorkflows(): Promise<Partial<WorkflowRow>[]> {
+export async function listWorkflows(): Promise<WorkflowListItem[]> {
   return db
     .prepare('SELECT id, name, description, is_published, publish_path, updated_at FROM workflows')
-    .all<WorkflowRow>()
+    .all<WorkflowListItem>()
 }
