@@ -1,0 +1,200 @@
+import { Workflow, FlowNode, FlowEdge, Execution, ExecutionLog, ExecutionContext, NodeExecutionState } from '../types/index.js'
+import { runPythonCode } from './dockerRunner.js'
+import { callHttpApi } from './httpProxy.js'
+import vm from 'vm'
+
+export function evaluateTemplate(template: string, ctx: any): any {
+  if (typeof template !== 'string') return template
+  if (!template.includes('{{')) return template
+  return template.replace(/\{\{(.+?)\}\}/g, (_, expr) => {
+    const value = evaluatePath(expr.trim(), ctx)
+    return value === undefined ? '' : JSON.stringify(value)
+  })
+}
+
+export function evaluatePath(expr: string, ctx: any): any {
+  const parts = expr.split('.')
+  let value = ctx
+  for (const part of parts) {
+    if (value == null) return undefined
+    value = value[part]
+  }
+  return value
+}
+
+export function evaluateCondition(expr: string, ctx: any): boolean {
+  // The context uses `var` as a property name, but `var` is a reserved word
+  // and cannot be referenced directly in a JS expression. Replace it with a
+  // safe alias and run the expression in a non-strict VM context so `with`
+  // can resolve `ctx` and `__var` against the execution scope.
+  const safeExpr = expr.replace(/\bvar\b/g, '__var')
+  const scope = { ...ctx, __var: ctx.var }
+  const result = vm.runInNewContext(
+    `(function () { with (scope) { return (${safeExpr}); } })()`,
+    { scope },
+    { timeout: 1000 }
+  )
+  return Boolean(result)
+}
+
+export type EventHandler = (event: { type: string; nodeId: string; data?: any }) => void
+
+export async function executeWorkflow(
+  workflow: Workflow,
+  variables: Record<string, any>,
+  onEvent?: EventHandler
+): Promise<Execution> {
+  const nodes = workflow.nodes
+  const edges = workflow.edges
+  const startNode = nodes.find((n) => n.type === 'start')
+  if (!startNode) throw new Error('Workflow must have a start node')
+
+  const context: ExecutionContext = {}
+  const logs: ExecutionLog[] = []
+  const execution: Execution = {
+    workflow_id: workflow.id!,
+    status: 'running',
+    context,
+    logs,
+    result: null
+  }
+
+  function log(level: ExecutionLog['level'], nodeId: string, message: string) {
+    const entry = { time: new Date().toISOString(), nodeId, level, message }
+    logs.push(entry)
+    onEvent?.({ type: 'log', nodeId, data: entry })
+  }
+
+  function setNodeState(nodeId: string, state: Partial<NodeExecutionState>) {
+    if (!context[nodeId]) context[nodeId] = { input: null, output: null, status: 'pending' }
+    Object.assign(context[nodeId], state)
+    onEvent?.({ type: 'state', nodeId, data: context[nodeId] })
+  }
+
+  const ctx = { var: variables, ctx: context }
+
+  async function visit(nodeId: string): Promise<string | null> {
+    const node = nodes.find((n) => n.id === nodeId)
+    if (!node) return null
+
+    const incomingEdges = edges.filter((e) => e.target === nodeId)
+    const input: Record<string, any> = {}
+    for (const edge of incomingEdges) {
+      const sourceState = context[edge.source]
+      if (sourceState?.status === 'success') {
+        input[edge.source] = sourceState.output
+      }
+    }
+
+    setNodeState(nodeId, { input, status: 'running', startedAt: new Date().toISOString() })
+    log('info', nodeId, `Start executing ${node.type}`)
+
+    try {
+      const output = await executeNode(node, input, ctx)
+      setNodeState(nodeId, { output, status: 'success', endedAt: new Date().toISOString() })
+      log('info', nodeId, `Finished ${node.type}`)
+
+      const outgoingEdges = edges.filter((e) => e.source === nodeId)
+      const nextEdge = chooseNextEdge(node, outgoingEdges, output, ctx)
+      if (!nextEdge) return nodeId
+      return visit(nextEdge.target)
+    } catch (err: any) {
+      setNodeState(nodeId, { status: 'failed', error: err.message, endedAt: new Date().toISOString() })
+      log('error', nodeId, err.message)
+      throw err
+    }
+  }
+
+  try {
+    const endNodeId = await visit(startNode.id)
+    execution.status = 'success'
+    if (endNodeId) {
+      execution.result = context[endNodeId]?.output
+    }
+  } catch (err: any) {
+    execution.status = 'failed'
+    execution.result = { error: err.message }
+  }
+
+  execution.ended_at = new Date().toISOString()
+  return execution
+}
+
+async function executeNode(node: FlowNode, input: any, ctx: any): Promise<any> {
+  switch (node.type) {
+    case 'start':
+      return node.data.inputMapping ? mapValues(node.data.inputMapping, ctx) : input
+    case 'end':
+      return node.data.resultExpression ? evaluatePath(node.data.resultExpression, ctx) : input
+    case 'http':
+      return callHttpApi({
+        method: node.data.method || 'GET',
+        url: node.data.url,
+        headers: node.data.headers || {},
+        body: node.data.body,
+        timeout: node.data.timeout || 30000
+      }, ctx)
+    case 'python': {
+      const pythonInputs: Record<string, any> = {}
+      if (node.data.inputMapping) {
+        for (const [varName, expr] of Object.entries(node.data.inputMapping)) {
+          pythonInputs[varName] = evaluatePath(expr as string, ctx)
+        }
+      }
+      const result = await runPythonCode(node.data.code, pythonInputs)
+      if (!result.success) throw new Error(result.error)
+      const output: Record<string, any> = {}
+      if (node.data.outputMapping) {
+        for (const [key, varName] of Object.entries(node.data.outputMapping)) {
+          output[key] = varName === node.data.outputVar ? result.output : undefined
+        }
+      }
+      return output
+    }
+    case 'branch':
+      return evaluateCondition(node.data.condition, ctx)
+    case 'loop':
+      return executeLoop(node, ctx)
+    case 'parallel':
+      return executeParallel(node, ctx)
+    default:
+      throw new Error(`Unknown node type: ${node.type}`)
+  }
+}
+
+function chooseNextEdge(node: FlowNode, edges: FlowEdge[], output: any, ctx: any): FlowEdge | undefined {
+  if (node.type === 'branch') {
+    return edges.find((e) => e.label === (output ? 'true' : 'false'))
+  }
+  if (node.type === 'parallel') {
+    return edges.find((e) => e.label === 'join')
+  }
+  if (node.type === 'loop') {
+    return undefined // handled internally
+  }
+  return edges[0]
+}
+
+async function executeLoop(node: FlowNode, ctx: any): Promise<any> {
+  const iterator = evaluatePath(node.data.iteratorExpression, ctx)
+  if (!Array.isArray(iterator)) throw new Error('Loop iterator must be an array')
+  const results: any[] = []
+  for (const item of iterator) {
+    ctx.ctx[node.id] = { input: item, output: item, status: 'success' }
+    // simplified: loop body execution would traverse the body edge
+  }
+  return results
+}
+
+async function executeParallel(node: FlowNode, ctx: any): Promise<any> {
+  // Placeholder: full implementation traverses fork edges concurrently
+  return {}
+}
+
+function mapValues(mapping: Record<string, string>, ctx: any): Record<string, any> {
+  const result: Record<string, any> = {}
+  for (const [key, expr] of Object.entries(mapping)) {
+    result[key] = evaluatePath(expr, ctx)
+  }
+  return result
+}
