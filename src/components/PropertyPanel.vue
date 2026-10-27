@@ -4,7 +4,11 @@
     <div v-if="node">
       <p>ID: {{ node.id }}</p>
       <p>Type: {{ node.type }}</p>
-      <p>Label: {{ node.data?.label }}</p>
+      <el-form label-position="top">
+        <el-form-item label="Label">
+          <el-input v-model="label" placeholder="节点名称" />
+        </el-form-item>
+      </el-form>
     </div>
     <div v-else>
       <p>请选择一个节点</p>
@@ -13,10 +17,23 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import type { Node } from '@vue-flow/core'
 import { RegisteredApi } from '../../server/src/types/index.js'
 
-defineProps<{ node: any; apis: RegisteredApi[] }>()
-defineEmits(['update:node'])
+const props = defineProps<{ node: Node | null; apis: RegisteredApi[] }>()
+const emit = defineEmits<{ (e: 'update:node', node: Node): void }>()
+
+const label = computed({
+  get: () => (props.node?.data?.label as string) ?? '',
+  set: (value) => {
+    if (!props.node) return
+    emit('update:node', {
+      ...props.node,
+      data: { ...props.node.data, label: value }
+    })
+  }
+})
 </script>
 
 <style scoped>

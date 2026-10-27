@@ -15,10 +15,10 @@
 
 <script setup lang="ts">
 import { ref, watch, markRaw } from 'vue'
-import { VueFlow } from '@vue-flow/core'
+import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import type { Node, Edge, NodeTypesObject, NodeComponent, NodeMouseEvent } from '@vue-flow/core'
+import type { Node, Edge, XYPosition, NodeTypesObject, NodeComponent, NodeMouseEvent } from '@vue-flow/core'
 import StartNode from './nodes/StartNode.vue'
 import EndNode from './nodes/EndNode.vue'
 import HttpNode from './nodes/HttpNode.vue'
@@ -26,6 +26,13 @@ import PythonNode from './nodes/PythonNode.vue'
 import BranchNode from './nodes/BranchNode.vue'
 import LoopNode from './nodes/LoopNode.vue'
 import ParallelNode from './nodes/ParallelNode.vue'
+
+interface FlowNode {
+  id: string
+  type: string
+  position: XYPosition
+  data?: any
+}
 
 const props = defineProps<{ nodes: Node[]; edges: Edge[] }>()
 const emit = defineEmits(['update:nodes', 'update:edges', 'node-click'])
@@ -40,10 +47,11 @@ const nodeTypes: NodeTypesObject = {
   parallel: markRaw(ParallelNode) as NodeComponent
 }
 
-const localNodes = ref<Node[]>(props.nodes)
+const localNodes = ref<FlowNode[]>(props.nodes as FlowNode[])
 const localEdges = ref<Edge[]>(props.edges)
+const { screenToFlowCoordinate } = useVueFlow()
 
-watch(() => props.nodes, (v) => { localNodes.value = v }, { deep: true })
+watch(() => props.nodes, (v) => { localNodes.value = v as FlowNode[] }, { deep: true })
 watch(() => props.edges, (v) => { localEdges.value = v }, { deep: true })
 watch(localNodes, (v) => emit('update:nodes', v), { deep: true })
 watch(localEdges, (v) => emit('update:edges', v), { deep: true })
@@ -57,20 +65,35 @@ function onDrop(event: DragEvent) {
   event.preventDefault()
   const data = event.dataTransfer?.getData('application/vueflow')
   if (!data) return
-  const { type, api } = JSON.parse(data)
-  const rect = (event.target as HTMLElement).getBoundingClientRect()
-  const position = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
+
+  let payload: { type: string; api?: any }
+  try {
+    payload = JSON.parse(data)
+  } catch {
+    return
   }
-  const id = `${type}_${Date.now()}`
-  const node: Node = {
+
+  const { type, api } = payload
+  if (!type) return
+
+  const position = screenToFlowCoordinate({
+    x: event.clientX,
+    y: event.clientY
+  })
+
+  const id =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`
+
+  const node: FlowNode = {
     id,
     type,
     position,
-    data: api ? { ...api, label: api.name } : { label: type }
+    data: api ? { ...api, label: api.name ?? type } : { label: type }
   }
-  ;(localNodes.value as any).push(node)
+
+  localNodes.value.push(node)
 }
 
 function onNodeClick(event: NodeMouseEvent) {

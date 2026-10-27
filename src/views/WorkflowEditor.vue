@@ -3,8 +3,8 @@
     <el-page-header title="流程编排" @back="$router.push('/apis')" />
     <div class="toolbar">
       <el-input v-model="workflow.name" placeholder="流程名称" style="width: 200px" />
-      <el-button type="primary" @click="save">保存</el-button>
-      <el-button @click="run">运行</el-button>
+      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      <el-button :loading="running" @click="run">运行</el-button>
     </div>
     <div class="editor-body">
       <NodeLibrary :apis="apis" />
@@ -13,7 +13,7 @@
         v-model:edges="workflow.edges"
         @node-click="selectedNode = $event"
       />
-      <PropertyPanel v-model:node="selectedNode" :apis="apis" />
+      <PropertyPanel v-model:node="selectedNode" :apis="apis" @update:node="onUpdateNode" />
     </div>
   </div>
 </template>
@@ -21,6 +21,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import type { Node } from '@vue-flow/core'
 import { apiApi, workflowApi } from '../api/index.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import FlowCanvas from '../components/FlowCanvas.vue'
@@ -30,29 +32,60 @@ import { Workflow, RegisteredApi } from '../../server/src/types/index.js'
 const route = useRoute()
 const workflow = ref<Workflow>({ name: '新流程', nodes: [], edges: [] })
 const apis = ref<RegisteredApi[]>([])
-const selectedNode = ref<any>(null)
+const selectedNode = ref<Node | null>(null)
+const saving = ref(false)
+const running = ref(false)
 
 onMounted(async () => {
-  apis.value = await apiApi.list()
-  const id = route.params.id
-  if (id) {
-    workflow.value = await workflowApi.get(Number(id))
+  try {
+    apis.value = await apiApi.list()
+    const id = route.params.id
+    if (id) {
+      workflow.value = await workflowApi.get(Number(id))
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.message || '加载数据失败')
   }
 })
 
-async function save() {
-  if (workflow.value.id) {
-    await workflowApi.update(workflow.value.id, workflow.value)
-  } else {
-    const res = await workflowApi.create(workflow.value)
-    workflow.value.id = res.data.id
+async function save(): Promise<boolean> {
+  saving.value = true
+  try {
+    if (workflow.value.id) {
+      await workflowApi.update(workflow.value.id, workflow.value)
+    } else {
+      const res = await workflowApi.create(workflow.value)
+      workflow.value.id = res.data.id
+    }
+    ElMessage.success('保存成功')
+    return true
+  } catch (err: any) {
+    ElMessage.error(err?.message || '保存失败')
+    return false
+  } finally {
+    saving.value = false
   }
 }
 
 async function run() {
-  if (!workflow.value.id) await save()
-  const result = await workflowApi.execute(workflow.value.id!, {})
-  console.log(result)
+  running.value = true
+  try {
+    if (!workflow.value.id && !(await save())) return
+    const result = await workflowApi.execute(workflow.value.id!, {})
+    ElMessage.success('运行成功')
+    console.log(result)
+  } catch (err: any) {
+    ElMessage.error(err?.message || '运行失败')
+  } finally {
+    running.value = false
+  }
+}
+
+function onUpdateNode(node: Node) {
+  const index = workflow.value.nodes.findIndex((n) => n.id === node.id)
+  if (index !== -1) {
+    workflow.value.nodes[index] = node as Workflow['nodes'][number]
+  }
 }
 </script>
 
