@@ -1,13 +1,131 @@
-import { describe, it, expect } from 'vitest'
-import { callHttpApi } from '../src/services/httpProxy.js'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import axios from 'axios'
+import { callHttpApi, HttpProxyError } from '../src/services/httpProxy.js'
 
-describe('httpProxy', () => {
-  it('renders url template from context', async () => {
-    const result = await callHttpApi(
-      { method: 'GET', url: 'https://httpbin.org/get?x={{ctx.userId}}' },
-      { ctx: { userId: 42 } }
+vi.mock('axios')
+
+const mockedAxios = vi.mocked(axios, true) as unknown as ReturnType<typeof vi.fn>
+
+beforeEach(() => {
+  mockedAxios.mockReset()
+})
+
+describe('callHttpApi', () => {
+  it('renders URL template from context', async () => {
+    mockedAxios.mockResolvedValue({ status: 200, data: {}, headers: {} })
+
+    await callHttpApi(
+      { method: 'GET', url: 'https://example.com/users/{{userId}}' },
+      { userId: 42 }
     )
-    expect(result.status).toBe(200)
-    expect(result.data.args.x).toBe('42')
+
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://example.com/users/42' })
+    )
+  })
+
+  it('renders header templates from context', async () => {
+    mockedAxios.mockResolvedValue({ status: 200, data: {}, headers: {} })
+
+    await callHttpApi(
+      {
+        method: 'GET',
+        url: 'https://example.com',
+        headers: {
+          Authorization: 'Bearer {{token}}',
+          'X-User': '{{user.id}}'
+        }
+      },
+      { token: 'abc', user: { id: 7 } }
+    )
+
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer abc',
+          'X-User': '7'
+        }
+      })
+    )
+  })
+
+  it('renders and parses JSON body template for non-GET methods', async () => {
+    mockedAxios.mockResolvedValue({ status: 201, data: { ok: true }, headers: {} })
+
+    const result = await callHttpApi(
+      {
+        method: 'POST',
+        url: 'https://example.com',
+        body: '{"id":{{userId}},"name":"{{name}}"}'
+      },
+      { userId: 7, name: 'Ada' }
+    )
+
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        data: { id: 7, name: 'Ada' }
+      })
+    )
+    expect(result.status).toBe(201)
+  })
+
+  it('returns non-2xx responses without throwing', async () => {
+    mockedAxios.mockResolvedValue({
+      status: 404,
+      data: { error: 'not found' },
+      headers: {}
+    })
+
+    const result = await callHttpApi(
+      { method: 'GET', url: 'https://example.com' },
+      {}
+    )
+
+    expect(result.status).toBe(404)
+    expect(result.data).toEqual({ error: 'not found' })
+  })
+
+  it('throws a structured error when axios rejects with a network/timeout error', async () => {
+    const networkError = new Error('ECONNREFUSED')
+    ;(networkError as any).response = { status: 0, data: 'connection refused' }
+    mockedAxios.mockRejectedValue(networkError)
+
+    try {
+      await callHttpApi({ method: 'GET', url: 'https://example.com' }, {})
+      throw new Error('expected callHttpApi to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpProxyError)
+      expect((err as HttpProxyError).message).toBe('ECONNREFUSED')
+      expect((err as HttpProxyError).status).toBe(0)
+      expect((err as HttpProxyError).data).toBe('connection refused')
+    }
+  })
+
+  it('throws a structured error for invalid JSON body', async () => {
+    try {
+      await callHttpApi(
+        { method: 'POST', url: 'https://example.com', body: 'not json' },
+        {}
+      )
+      throw new Error('expected callHttpApi to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpProxyError)
+      expect((err as HttpProxyError).message).toContain('Invalid JSON body')
+      expect((err as HttpProxyError).data).toBe('not json')
+    }
+  })
+
+  it('renders missing template variables as empty strings', async () => {
+    mockedAxios.mockResolvedValue({ status: 200, data: {}, headers: {} })
+
+    await callHttpApi(
+      { method: 'GET', url: 'https://example.com/{{missing}}' },
+      {}
+    )
+
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://example.com/' })
+    )
   })
 })

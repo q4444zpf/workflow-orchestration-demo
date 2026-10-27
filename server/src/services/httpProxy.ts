@@ -14,6 +14,18 @@ export interface HttpResult {
   headers: Record<string, string>
 }
 
+export class HttpProxyError extends Error {
+  status?: number
+  data?: any
+
+  constructor(message: string, options?: { status?: number; data?: any; cause?: unknown }) {
+    super(message, { cause: options?.cause })
+    this.name = 'HttpProxyError'
+    this.status = options?.status
+    this.data = options?.data
+  }
+}
+
 export async function callHttpApi(config: HttpConfig, context: any): Promise<HttpResult> {
   const url = renderTemplate(config.url, context)
   const headers: Record<string, string> = {}
@@ -36,14 +48,34 @@ export async function callHttpApi(config: HttpConfig, context: any): Promise<Htt
   }
 
   if (body !== undefined && config.method !== 'GET') {
-    axiosConfig.data = typeof body === 'string' ? JSON.parse(body) : body
+    if (typeof body === 'string') {
+      try {
+        axiosConfig.data = JSON.parse(body)
+      } catch (err) {
+        throw new HttpProxyError(
+          `Invalid JSON body: ${err instanceof Error ? err.message : String(err)}`,
+          { data: body, cause: err }
+        )
+      }
+    } else {
+      axiosConfig.data = body
+    }
   }
 
-  const res = await axios(axiosConfig)
-  return {
-    status: res.status,
-    data: res.data,
-    headers: res.headers as Record<string, string>
+  try {
+    const res = await axios(axiosConfig)
+    return {
+      status: res.status,
+      data: res.data,
+      headers: res.headers as Record<string, string>
+    }
+  } catch (err: any) {
+    const response = err?.response
+    throw new HttpProxyError(err?.message || 'HTTP request failed', {
+      status: response?.status,
+      data: response?.data,
+      cause: err
+    })
   }
 }
 
