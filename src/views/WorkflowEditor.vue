@@ -32,7 +32,14 @@ import { Workflow, RegisteredApi } from '../../server/src/types/index.js'
 type TypedNode = Node & { type: string; data: Record<string, unknown> }
 
 function isTypedNode(node: Node): node is TypedNode {
-  return typeof node.type === 'string'
+  return (
+    typeof node === 'object' &&
+    node !== null &&
+    typeof node.id === 'string' &&
+    typeof node.type === 'string' &&
+    typeof node.data === 'object' &&
+    node.data !== null
+  )
 }
 
 const route = useRoute()
