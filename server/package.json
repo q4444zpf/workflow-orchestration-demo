@@ -10,7 +10,7 @@
   "dependencies": {
     "express": "^4.19.0",
     "cors": "^2.8.5",
-    "better-sqlite3": "^9.4.0",
+    "sqlite3": "^5.1.7",
     "axios": "^1.6.0",
     "uuid": "^9.0.0"
   },
