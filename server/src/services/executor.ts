@@ -22,16 +22,58 @@ export function evaluatePath(expr: string, ctx: any): any {
   return value
 }
 
+function renameVarIdentifier(expr: string): string {
+  // Replace the standalone identifier `var` with a safe alias, but only
+  // outside of string literals. This keeps the user-facing `var.xxx` syntax
+  // working without corrupting values like 'var' inside strings.
+  let result = ''
+  let i = 0
+  while (i < expr.length) {
+    const ch = expr[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      result += quote
+      i++
+      while (i < expr.length) {
+        const c = expr[i]
+        result += c
+        if (c === '\\') {
+          i++
+          if (i < expr.length) {
+            result += expr[i]
+            i++
+          }
+        } else if (c === quote) {
+          i++
+          break
+        } else {
+          i++
+        }
+      }
+    } else if (/\w/.test(ch)) {
+      let word = ''
+      while (i < expr.length && /[\w$]/.test(expr[i])) {
+        word += expr[i]
+        i++
+      }
+      result += word === 'var' ? '__var' : word
+    } else {
+      result += ch
+      i++
+    }
+  }
+  return result
+}
+
 export function evaluateCondition(expr: string, ctx: any): boolean {
-  // The context uses `var` as a property name, but `var` is a reserved word
-  // and cannot be referenced directly in a JS expression. Replace it with a
-  // safe alias and run the expression in a non-strict VM context so `with`
-  // can resolve `ctx` and `__var` against the execution scope.
-  const safeExpr = expr.replace(/\bvar\b/g, '__var')
-  const scope = { ...ctx, __var: ctx.var }
+  // The context exposes workflow variables as `var`, but `var` is a reserved
+  // word and cannot be referenced directly in a JS expression. We rewrite
+  // standalone `var` identifiers to `__var` and run the expression in an
+  // isolated VM context with a timeout.
+  const safeExpr = renameVarIdentifier(expr)
   const result = vm.runInNewContext(
-    `(function () { with (scope) { return (${safeExpr}); } })()`,
-    { scope },
+    `(function () { return (${safeExpr}); })()`,
+    { __var: ctx.var, ctx: ctx.ctx },
     { timeout: 1000 }
   )
   return Boolean(result)
@@ -95,7 +137,7 @@ export async function executeWorkflow(
       log('info', nodeId, `Finished ${node.type}`)
 
       const outgoingEdges = edges.filter((e) => e.source === nodeId)
-      const nextEdge = chooseNextEdge(node, outgoingEdges, output, ctx)
+      const nextEdge = chooseNextEdge(node, outgoingEdges, output)
       if (!nextEdge) return nodeId
       return visit(nextEdge.target)
     } catch (err: any) {
@@ -162,7 +204,7 @@ async function executeNode(node: FlowNode, input: any, ctx: any): Promise<any> {
   }
 }
 
-function chooseNextEdge(node: FlowNode, edges: FlowEdge[], output: any, ctx: any): FlowEdge | undefined {
+function chooseNextEdge(node: FlowNode, edges: FlowEdge[], output: any): FlowEdge | undefined {
   if (node.type === 'branch') {
     return edges.find((e) => e.label === (output ? 'true' : 'false'))
   }

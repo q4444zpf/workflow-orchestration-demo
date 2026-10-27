@@ -52,5 +52,12 @@ describe('executor', () => {
       expect(evaluateCondition('var.x > 10', { var: { x: 42 } })).toBe(true)
       expect(evaluateCondition('var.x === 10', { var: { x: 42 } })).toBe(false)
     })
+
+    it('does not replace var inside string literals', () => {
+      const ctx = { var: { x: 1 }, ctx: { foo: 'var' } }
+      expect(evaluateCondition("ctx.foo === 'var'", ctx)).toBe(true)
+      expect(evaluateCondition('var.x === 1 && ctx.foo === "var"', ctx)).toBe(true)
+      expect(evaluateCondition("ctx.foo !== 'var'", ctx)).toBe(false)
+    })
   })
 })
