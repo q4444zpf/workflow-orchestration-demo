@@ -11,7 +11,7 @@
       <FlowCanvas
         v-model:nodes="workflow.nodes"
         v-model:edges="workflow.edges"
-        @node-click="selectedNode = $event"
+        @node-click="selectedNode = isTypedNode($event.node) ? $event.node : null"
       />
       <PropertyPanel v-model:node="selectedNode" :apis="apis" @update:node="onUpdateNode" />
     </div>
@@ -29,10 +29,16 @@ import FlowCanvas from '../components/FlowCanvas.vue'
 import PropertyPanel from '../components/PropertyPanel.vue'
 import { Workflow, RegisteredApi } from '../../server/src/types/index.js'
 
+type TypedNode = Node & { type: string; data: Record<string, unknown> }
+
+function isTypedNode(node: Node): node is TypedNode {
+  return typeof node.type === 'string'
+}
+
 const route = useRoute()
 const workflow = ref<Workflow>({ name: '新流程', nodes: [], edges: [] })
 const apis = ref<RegisteredApi[]>([])
-const selectedNode = ref<Node | null>(null)
+const selectedNode = ref<TypedNode | null>(null)
 const saving = ref(false)
 const running = ref(false)
 
@@ -43,8 +49,8 @@ onMounted(async () => {
     if (id) {
       workflow.value = await workflowApi.get(Number(id))
     }
-  } catch (err: any) {
-    ElMessage.error(err?.message || '加载数据失败')
+  } catch (err) {
+    ElMessage.error((err instanceof Error ? err.message : null) || '加载数据失败')
   }
 })
 
@@ -59,8 +65,8 @@ async function save(): Promise<boolean> {
     }
     ElMessage.success('保存成功')
     return true
-  } catch (err: any) {
-    ElMessage.error(err?.message || '保存失败')
+  } catch (err) {
+    ElMessage.error((err instanceof Error ? err.message : null) || '保存失败')
     return false
   } finally {
     saving.value = false
@@ -71,20 +77,20 @@ async function run() {
   running.value = true
   try {
     if (!workflow.value.id && !(await save())) return
-    const result = await workflowApi.execute(workflow.value.id!, {})
+    if (!workflow.value.id) return
+    await workflowApi.execute(workflow.value.id, {})
     ElMessage.success('运行成功')
-    console.log(result)
-  } catch (err: any) {
-    ElMessage.error(err?.message || '运行失败')
+  } catch (err) {
+    ElMessage.error((err instanceof Error ? err.message : null) || '运行失败')
   } finally {
     running.value = false
   }
 }
 
-function onUpdateNode(node: Node) {
+function onUpdateNode(node: TypedNode) {
   const index = workflow.value.nodes.findIndex((n) => n.id === node.id)
   if (index !== -1) {
-    workflow.value.nodes[index] = node as Workflow['nodes'][number]
+    workflow.value.nodes[index] = node
   }
 }
 </script>

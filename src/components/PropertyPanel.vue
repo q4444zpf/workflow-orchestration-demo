@@ -21,16 +21,21 @@ import { computed } from 'vue'
 import type { Node } from '@vue-flow/core'
 import { RegisteredApi } from '../../server/src/types/index.js'
 
-const props = defineProps<{ node: Node | null; apis: RegisteredApi[] }>()
-const emit = defineEmits<{ (e: 'update:node', node: Node): void }>()
+type TypedNode = Node & { type: string; data: Record<string, unknown> }
+
+const props = defineProps<{ node: TypedNode | null; apis: RegisteredApi[] }>()
+const emit = defineEmits<{ (e: 'update:node', node: TypedNode): void }>()
 
 const label = computed({
-  get: () => (props.node?.data?.label as string) ?? '',
+  get: () => {
+    const raw = props.node?.data?.label
+    return typeof raw === 'string' ? raw : ''
+  },
   set: (value) => {
     if (!props.node) return
     emit('update:node', {
       ...props.node,
-      data: { ...props.node.data, label: value }
+      data: { ...(props.node.data || {}), label: value }
     })
   }
 })
