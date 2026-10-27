@@ -70,9 +70,11 @@ npm run dev:server
 
 ## 使用说明
 
-### 1. 注册外部 API
+### 1. 注册外部 API（可选）
 
-在浏览器中打开 **API 管理** 页面，点击注册 API：
+示例工作流 `examples/sample-workflow.json` 的 HTTP 节点使用硬编码地址 `https://httpbin.org/get?userId={{var.userId}}`，因此**直接导入示例时无需注册 API**。
+
+注册 API 适用于需要在多个 HTTP 节点中复用同一接口、或希望通过 API 管理页面统一维护外部服务的场景。注册命令示例：
 
 ```bash
 curl -X POST http://localhost:3000/api/apis \
@@ -115,18 +117,18 @@ curl -X POST http://localhost:3000/api/workflows \
 ```bash
 curl -X POST http://localhost:3000/api/workflows/1/execute \
   -H "Content-Type: application/json" \
-  -d '{"variables": {"userId": "alice"}}'
+  -d '{"variables": {"userId": "123"}}'
 ```
 
-返回结果示例（userId 长度 >= 4 时走 true 分支）：
+返回结果示例（`userId="123"` 长度为 3，评分 60，走 `false` 分支）：
 
 ```json
 {
   "executionId": 1,
   "status": "success",
   "result": {
-    "userId": "alice",
-    "score": 100
+    "userId": "123",
+    "score": 60
   },
   "context": { ... },
   "logs": [ ... ]
@@ -135,20 +137,20 @@ curl -X POST http://localhost:3000/api/workflows/1/execute \
 
 ### 4. 发布工作流为 API
 
-在编辑器中输入发布路径（如 `user-score`）并点击 **发布**，或调用：
+在编辑器中输入发布路径（如 `sample`）并点击 **发布**，或调用：
 
 ```bash
 curl -X POST http://localhost:3000/api/workflows/1/publish \
   -H "Content-Type: application/json" \
-  -d '{"publish_path": "user-score"}'
+  -d '{"publish_path": "sample"}'
 ```
 
 ### 5. 通过 curl 调用已发布的工作流
 
 ```bash
-curl -X POST http://localhost:3000/api/run/user-score \
+curl -X POST http://localhost:3000/api/run/sample \
   -H "Content-Type: application/json" \
-  -d '{"userId": "bob"}'
+  -d '{"userId": "123"}'
 ```
 
 ## 项目目录
