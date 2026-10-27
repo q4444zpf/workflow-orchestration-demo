@@ -1,17 +1,20 @@
 import { Router } from 'express'
 import { db, getWorkflow } from '../db/index.js'
 import { executeWorkflow } from '../services/executor.js'
-import { Workflow } from '../types/index.js'
+import { asyncHandler } from '../middleware/asyncHandler.js'
+import { HttpError } from '../middleware/errorHandler.js'
+import { validateId, validateWorkflow } from '../middleware/validation.js'
 
 const router = Router()
 
-router.get('/', async (_req, res) => {
+router.get('/', asyncHandler(async (_req, res) => {
   res.json(await db.prepare('SELECT id, name, description, is_published, publish_path, updated_at FROM workflows ORDER BY id DESC').all())
-})
+}))
 
-router.get('/:id', async (req, res) => {
-  const row = await getWorkflow(Number(req.params.id))
-  if (!row) return res.status(404).json({ error: 'Not found' })
+router.get('/:id', asyncHandler(async (req, res) => {
+  const id = validateId(req.params.id)
+  const row = await getWorkflow(id)
+  if (!row) throw new HttpError(404, 'Workflow not found')
   res.json({
     ...row,
     variables: row.variables ? JSON.parse(row.variables) : [],
@@ -19,31 +22,35 @@ router.get('/:id', async (req, res) => {
     edges: JSON.parse(row.edges),
     is_published: Boolean(row.is_published)
   })
-})
+}))
 
-router.post('/', async (req, res) => {
-  const wf: Workflow = req.body
+router.post('/', asyncHandler(async (req, res) => {
+  const wf = validateWorkflow(req.body)
   const info = await db.prepare(`
     INSERT INTO workflows (name, description, variables, nodes, edges)
     VALUES (?, ?, ?, ?, ?)
   `).run([wf.name, wf.description || null, JSON.stringify(wf.variables || []), JSON.stringify(wf.nodes), JSON.stringify(wf.edges)])
-  res.json({ id: info.lastID })
-})
+  res.status(201).json({ id: info.lastID })
+}))
 
-router.put('/:id', async (req, res) => {
-  const wf: Workflow = req.body
+router.put('/:id', asyncHandler(async (req, res) => {
+  const id = validateId(req.params.id)
+  const wf = validateWorkflow(req.body)
+  const existing = await getWorkflow(id)
+  if (!existing) throw new HttpError(404, 'Workflow not found')
   await db.prepare(`
     UPDATE workflows
     SET name=?, description=?, variables=?, nodes=?, edges=?, updated_at=CURRENT_TIMESTAMP
     WHERE id=?
-  `).run([wf.name, wf.description || null, JSON.stringify(wf.variables || []), JSON.stringify(wf.nodes), JSON.stringify(wf.edges), req.params.id])
+  `).run([wf.name, wf.description || null, JSON.stringify(wf.variables || []), JSON.stringify(wf.nodes), JSON.stringify(wf.edges), id])
   res.json({ updated: true })
-})
+}))
 
-router.post('/:id/execute', async (req, res) => {
-  const row = await getWorkflow(Number(req.params.id))
-  if (!row) return res.status(404).json({ error: 'Not found' })
-  const workflow: Workflow = {
+router.post('/:id/execute', asyncHandler(async (req, res) => {
+  const id = validateId(req.params.id)
+  const row = await getWorkflow(id)
+  if (!row) throw new HttpError(404, 'Workflow not found')
+  const workflow = {
     id: row.id,
     name: row.name,
     description: row.description || undefined,
@@ -66,6 +73,6 @@ router.post('/:id/execute', async (req, res) => {
     execution.ended_at
   ])
   res.json({ executionId: info.lastID, ...execution })
-})
+}))
 
 export default router
