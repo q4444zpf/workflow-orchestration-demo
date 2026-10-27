@@ -128,38 +128,42 @@ async function persistAndExecuteWorkflow(row: NonNullable<Awaited<ReturnType<typ
   ])
   const executionId = insertInfo.lastID as number
 
-  setImmediate(async () => {
-    try {
-      const execution = await executeWorkflow(workflow, variables, (event) => {
-        emitExecutionEvent(executionId, event)
-      })
+  setImmediate(() => {
+    (async () => {
+      try {
+        const execution = await executeWorkflow(workflow, variables, (event) => {
+          emitExecutionEvent(executionId, event)
+        })
 
-      await db.prepare(`
-        UPDATE executions
-        SET status=?, context=?, logs=?, result=?, ended_at=?
-        WHERE id=?
-      `).run([
-        execution.status,
-        JSON.stringify(execution.context),
-        JSON.stringify(execution.logs),
-        JSON.stringify(execution.result),
-        execution.ended_at,
-        executionId
-      ])
-    } catch (err: any) {
-      await db.prepare(`
-        UPDATE executions
-        SET status=?, logs=?, ended_at=?
-        WHERE id=?
-      `).run([
-        'failed',
-        JSON.stringify([{ time: new Date().toISOString(), nodeId: '', level: 'error', message: err.message }]),
-        new Date().toISOString(),
-        executionId
-      ])
-    } finally {
-      clearExecutionBuffer(executionId)
-    }
+        await db.prepare(`
+          UPDATE executions
+          SET status=?, context=?, logs=?, result=?, ended_at=?
+          WHERE id=?
+        `).run([
+          execution.status,
+          JSON.stringify(execution.context),
+          JSON.stringify(execution.logs),
+          JSON.stringify(execution.result),
+          execution.ended_at,
+          executionId
+        ])
+      } catch (err: any) {
+        await db.prepare(`
+          UPDATE executions
+          SET status=?, logs=?, ended_at=?
+          WHERE id=?
+        `).run([
+          'failed',
+          JSON.stringify([{ time: new Date().toISOString(), nodeId: '', level: 'error', message: err.message }]),
+          new Date().toISOString(),
+          executionId
+        ])
+      } finally {
+        clearExecutionBuffer(executionId)
+      }
+    })().catch((err) => {
+      console.error('Unhandled error in workflow execution background task', err)
+    })
   })
 
   return executionId

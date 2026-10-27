@@ -143,7 +143,10 @@ async function run() {
       inputValue: variablesInput.value,
       inputValidator: (value) => {
         try {
-          JSON.parse(value)
+          const parsed = JSON.parse(value)
+          if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+            return '请输入合法的 JSON 对象'
+          }
           return true
         } catch {
           return '请输入合法的 JSON 对象'
@@ -171,7 +174,7 @@ async function run() {
       started_at: new Date().toISOString()
     }
     subscribeExecutionEvents(result.executionId)
-    ElMessage.success('运行成功')
+    ElMessage.success('运行已开始，请在右侧面板查看实时状态')
   } catch (err) {
     if ((err as any)?.action === 'cancel') return
     ElMessage.error((err instanceof Error ? err.message : null) || '运行失败')
