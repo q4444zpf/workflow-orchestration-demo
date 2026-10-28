@@ -50,7 +50,7 @@
 | 代码编辑 | Monaco Editor (monaco-editor-vue3) | 支持 Python 语法高亮、JSON 编辑 |
 | 后端框架 | Express + TypeScript | 轻量、易扩展 |
 | Python 沙箱 | Docker + 自定义 Python 镜像 | 资源/网络隔离 |
-| 数据库 | SQLite (better-sqlite3) | 零配置、单文件、Demo 足够 |
+| 数据库 | SQLite (sqlite3) | 零配置、单文件、跨平台预编译二进制 |
 | HTTP 调用 | axios（后端代理） | 统一处理 CORS、超时、错误 |
 
 ### 2.2 部署方式
