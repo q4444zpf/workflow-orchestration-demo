@@ -1,0 +1,4 @@
+FROM python:3.11-alpine
+WORKDIR /runner
+COPY runner.py /runner/runner.py
+ENTRYPOINT ["python", "/runner/runner.py"]
