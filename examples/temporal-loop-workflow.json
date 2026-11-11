@@ -1,0 +1,16 @@
+{
+  "name": "Temporal 普通与空循环",
+  "description": "逐项输出并汇总数组。默认返回 [1,2,3]；将 values 改为 [] 可验证空循环直接进入后续节点。",
+  "variables": [{ "name": "values", "type": "array", "default": [1, 2, 3], "description": "循环数组，也可以传入空数组" }],
+  "nodes": [
+    { "id": "start", "type": "start", "position": { "x": 80, "y": 160 }, "data": { "label": "开始" } },
+    { "id": "loop", "type": "loop", "position": { "x": 320, "y": 160 }, "data": { "label": "逐项循环", "iteratorExpression": "var.values" } },
+    { "id": "bodyEnd", "type": "end", "position": { "x": 580, "y": 60 }, "data": { "label": "本轮元素", "resultExpression": "var.item" } },
+    { "id": "end", "type": "end", "position": { "x": 580, "y": 280 }, "data": { "label": "循环汇总", "resultExpression": "ctx.loop.output" } }
+  ],
+  "edges": [
+    { "id": "start-loop", "source": "start", "target": "loop" },
+    { "id": "loop-body", "source": "loop", "target": "bodyEnd", "label": "body" },
+    { "id": "loop-next", "source": "loop", "target": "end", "label": "next" }
+  ]
+}

@@ -151,4 +151,35 @@ describe('callHttpApi', () => {
       expect.objectContaining({ url: 'https://example.com/' })
     )
   })
+
+  it('将取消信号和响应字节限制传给 HTTP 传输层', async () => {
+    mockedAxios.mockResolvedValue({ status: 200, data: {}, headers: {} })
+    const controller = new AbortController()
+    await callHttpApi({ method: 'GET', url: 'https://example.com' }, {}, { signal: controller.signal, maxOutputBytes: 512 })
+    expect(mockedAxios).toHaveBeenCalledWith(expect.objectContaining({
+      signal: controller.signal, maxContentLength: 512, maxBodyLength: 512
+    }))
+  })
+
+  it('取消保留可识别的 AbortError 和原始原因', async () => {
+    const controller = new AbortController()
+    const cancellation = Object.assign(new Error('canceled'), { code: 'ERR_CANCELED' })
+    mockedAxios.mockRejectedValue(cancellation)
+    await expect(callHttpApi({ method: 'GET', url: 'https://example.com' }, {}, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError', cause: cancellation })
+  })
+
+  it('已经取消的调用不会发起 HTTP 请求', async () => {
+    const controller = new AbortController()
+    controller.abort('停止执行')
+    await expect(callHttpApi({ method: 'GET', url: 'https://example.com' }, {}, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError', cause: '停止执行' })
+    expect(mockedAxios).not.toHaveBeenCalled()
+  })
+
+  it('响应头转换为字符串字典并忽略空值', async () => {
+    mockedAxios.mockResolvedValue({ status: 200, data: {}, headers: { 'x-count': 2, 'set-cookie': ['a=1', 'b=2'], empty: null, missing: undefined } })
+    const result = await callHttpApi({ method: 'GET', url: 'https://example.com' }, {})
+    expect(result.headers).toEqual({ 'x-count': '2', 'set-cookie': 'a=1, b=2' })
+  })
 })

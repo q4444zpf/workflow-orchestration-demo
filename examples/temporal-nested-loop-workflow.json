@@ -1,0 +1,20 @@
+{
+  "name": "Temporal 嵌套循环",
+  "description": "外层遍历数组组，内层逐项汇总；各轮 item 独立，默认返回 [[1,2],[3]]。",
+  "variables": [{ "name": "values", "type": "array", "default": [[1, 2], [3]], "description": "嵌套数组" }],
+  "nodes": [
+    { "id": "start", "type": "start", "position": { "x": 60, "y": 260 }, "data": { "label": "开始" } },
+    { "id": "outer", "type": "loop", "position": { "x": 280, "y": 260 }, "data": { "label": "外层循环", "iteratorExpression": "var.values" } },
+    { "id": "inner", "type": "loop", "position": { "x": 520, "y": 100 }, "data": { "label": "内层循环", "iteratorExpression": "var.item" } },
+    { "id": "innerBody", "type": "end", "position": { "x": 780, "y": 20 }, "data": { "label": "内层元素", "resultExpression": "var.item" } },
+    { "id": "outerBody", "type": "end", "position": { "x": 780, "y": 180 }, "data": { "label": "本组汇总", "resultExpression": "ctx.inner.output" } },
+    { "id": "end", "type": "end", "position": { "x": 520, "y": 400 }, "data": { "label": "所有分组汇总", "resultExpression": "ctx.outer.output" } }
+  ],
+  "edges": [
+    { "id": "start-outer", "source": "start", "target": "outer" },
+    { "id": "outer-body", "source": "outer", "target": "inner", "label": "body" },
+    { "id": "outer-next", "source": "outer", "target": "end", "label": "next" },
+    { "id": "inner-body", "source": "inner", "target": "innerBody", "label": "body" },
+    { "id": "inner-next", "source": "inner", "target": "outerBody", "label": "next" }
+  ]
+}

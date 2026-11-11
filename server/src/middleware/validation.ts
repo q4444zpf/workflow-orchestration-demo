@@ -1,5 +1,6 @@
 import { HttpError } from './errorHandler.js'
 import { RegisteredApi, Workflow } from '../types/index.js'
+import { resolveParameterValues, validateParameterDefinitions } from '../shared/parameterSchema.js'
 
 export function validateId(raw: string): number {
   const id = Number(raw)
@@ -7,6 +8,12 @@ export function validateId(raw: string): number {
     throw new HttpError(400, `Invalid id: ${raw}`)
   }
   return id
+}
+
+export function validateVariables(definitions: unknown, inputs: unknown): Record<string, unknown> {
+  const result = resolveParameterValues(definitions, inputs)
+  if (result.issues.length) throw new HttpError(400, result.issues.map(issue => issue.message).join('；'), result.issues.map(issue => ({ code: 'PARAMETER_INVALID', message: issue.message, path: issue.path })))
+  return result.values
 }
 
 export function validateRegisteredApi(body: any): RegisteredApi {
@@ -42,13 +49,19 @@ export function validateWorkflow(body: any): Workflow {
   if (!name || typeof name !== 'string') {
     throw new HttpError(400, 'Field "name" is required and must be a string')
   }
-  if (!Array.isArray(nodes) || nodes.length === 0) {
-    throw new HttpError(400, 'Field "nodes" is required and must be a non-empty array')
+  if (!Array.isArray(nodes)) {
+    throw new HttpError(400, 'Field "nodes" is required and must be an array')
   }
   if (!Array.isArray(edges)) {
     throw new HttpError(400, 'Field "edges" is required and must be an array')
   }
+  if (body.schema_version !== undefined && body.schema_version !== 1) {
+    throw new HttpError(400, '不支持的工作流 JSON 版本，仅支持 schema_version=1')
+  }
+  const parameterIssues = validateParameterDefinitions(body.variables)
+  if (parameterIssues.length) throw new HttpError(400, parameterIssues.map(issue => issue.message).join('；'))
   return {
+    schema_version: 1,
     name,
     description: body.description,
     variables: body.variables,

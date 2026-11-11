@@ -1,0 +1,21 @@
+{
+  "name": "Temporal 独立并行分支",
+  "description": "两条独立分支并发读取 x、y，按 fork-N 汇总后仅执行一次 join，默认返回 {\"fork-0\":1,\"fork-1\":2}。",
+  "variables": [
+    { "name": "x", "type": "number", "default": 1, "description": "第一分支输入" },
+    { "name": "y", "type": "number", "default": 2, "description": "第二分支输入" }
+  ],
+  "nodes": [
+    { "id": "start", "type": "start", "position": { "x": 80, "y": 180 }, "data": { "label": "开始" } },
+    { "id": "parallel", "type": "parallel", "position": { "x": 320, "y": 180 }, "data": { "label": "并行分支" } },
+    { "id": "first", "type": "end", "position": { "x": 580, "y": 20 }, "data": { "label": "第一分支读取 x", "resultExpression": "var.x" } },
+    { "id": "second", "type": "end", "position": { "x": 580, "y": 180 }, "data": { "label": "第二分支读取 y", "resultExpression": "var.y" } },
+    { "id": "end", "type": "end", "position": { "x": 580, "y": 360 }, "data": { "label": "并行汇总", "resultExpression": "ctx.parallel.output" } }
+  ],
+  "edges": [
+    { "id": "start-parallel", "source": "start", "target": "parallel" },
+    { "id": "parallel-first", "source": "parallel", "target": "first", "label": "fork-0" },
+    { "id": "parallel-second", "source": "parallel", "target": "second", "label": "fork-1" },
+    { "id": "parallel-join", "source": "parallel", "target": "end", "label": "join" }
+  ]
+}

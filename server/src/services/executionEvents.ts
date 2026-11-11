@@ -1,94 +1,51 @@
 import type { Response } from 'express'
+import { getExecutionRow, readExecutionEvents } from './executionStore.js'
+import { synchronizeExecution } from './executionService.js'
 
-export interface ExecutionEvent {
-  type: string
-  nodeId: string
-  data?: unknown
-}
-
-type Connection = {
-  res: Response
-  heartbeat: NodeJS.Timeout
-}
-
-const connections = new Map<number, Set<Connection>>()
-const buffers = new Map<number, ExecutionEvent[]>()
-const BUFFER_LIMIT = 1000
-
-function writeEvent(res: Response, event: ExecutionEvent | string): boolean {
-  try {
-    const payload = typeof event === 'string' ? `${event}\n\n` : `data: ${JSON.stringify(event)}\n\n`
-    return res.write(payload)
-  } catch {
-    return false
-  }
-}
-
-function removeConnection(executionId: number, connection: Connection) {
-  clearInterval(connection.heartbeat)
-  const set = connections.get(executionId)
-  if (set) {
-    set.delete(connection)
-    if (set.size === 0) {
-      connections.delete(executionId)
-    }
-  }
-}
-
-function flushBuffer(executionId: number, res: Response) {
-  const buffer = buffers.get(executionId)
-  if (!buffer) return
-  for (const event of buffer) {
-    writeEvent(res, event)
-  }
-}
-
-export function emitExecutionEvent(executionId: number, event: ExecutionEvent) {
-  const buffer = buffers.get(executionId)
-  if (buffer) {
-    buffer.push(event)
-    if (buffer.length > BUFFER_LIMIT) buffer.shift()
-  } else {
-    buffers.set(executionId, [event])
-  }
-
-  const connectionSet = connections.get(executionId)
-  if (connectionSet) {
-    for (const connection of connectionSet) {
-      writeEvent(connection.res, event)
-    }
-  }
-}
-
-export function registerExecutionConnection(executionId: number, res: Response) {
+export function registerExecutionConnection(executionId: number, res: Response, after = 0): void {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
-
-  writeEvent(res, { type: 'connected', nodeId: '' })
-  flushBuffer(executionId, res)
-
-  const heartbeat = setInterval(() => {
-    writeEvent(res, ':heartbeat')
-  }, 15000)
-
-  const connection: Connection = { res, heartbeat }
-  const set = connections.get(executionId)
-  if (set) {
-    set.add(connection)
-  } else {
-    connections.set(executionId, new Set([connection]))
+  res.flushHeaders()
+  res.write(`data: ${JSON.stringify({ type: 'connected', nodeId: '' })}\n\n`)
+  let cursor = after
+  let closed = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let warned = false
+  const heartbeat = setInterval(() => { if (!closed) res.write(':heartbeat\n\n') }, 15000)
+  const close = () => { closed = true; clearInterval(heartbeat); clearTimeout(timer) }
+  res.on('close', close)
+  res.on('error', close)
+  async function write(payload: string): Promise<void> {
+    if (closed || res.writableEnded) return
+    if (!res.write(payload)) {
+      await new Promise<void>(resolve => {
+        const done = () => { res.off('drain', done); res.off('close', done); resolve() }
+        res.once('drain', done); res.once('close', done)
+      })
+    }
   }
-
-  res.on('error', () => {
-    removeConnection(executionId, connection)
-  })
-
-  res.on('close', () => {
-    removeConnection(executionId, connection)
-  })
-}
-
-export function clearExecutionBuffer(executionId: number) {
-  buffers.delete(executionId)
+  const pump = async () => {
+    if (closed) return
+    try {
+      try { await synchronizeExecution(executionId); warned = false }
+      catch {
+        if (!warned) await write(`data: ${JSON.stringify({ type: 'syncWarning', nodeId: '', data: { message: 'Temporal 暂时不可用，正在等待恢复状态同步' } })}\n\n`)
+        warned = true
+      }
+      const events = await readExecutionEvents(executionId, cursor)
+      for (const event of events) {
+        await write(`id: ${event.id}\ndata: ${JSON.stringify({ type: event.type, nodeId: event.nodeId, data: event.data })}\n\n`)
+        cursor = event.id
+        if (closed) return
+      }
+      const row = await getExecutionRow(executionId)
+      if (events.length < 20 && row?.status !== 'running') { close(); res.end(); return }
+      timer = setTimeout(() => { void pump() }, events.length === 20 ? 0 : 250)
+    } catch {
+      await write(`data: ${JSON.stringify({ type: 'streamError', nodeId: '', data: { message: '执行事件暂时不可读取，请重新连接' } })}\n\n`)
+      close(); res.end()
+    }
+  }
+  void pump()
 }

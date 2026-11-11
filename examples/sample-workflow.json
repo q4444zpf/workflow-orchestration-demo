@@ -13,28 +13,39 @@
     {
       "id": "start1",
       "type": "start",
-      "position": { "x": 80, "y": 200 },
+      "position": {
+        "x": 80,
+        "y": 200
+      },
       "data": {
         "inputMapping": {
           "userId": "var.userId"
-        }
+        },
+        "label": "开始"
       }
     },
     {
       "id": "http1",
       "type": "http",
-      "position": { "x": 280, "y": 200 },
+      "position": {
+        "x": 280,
+        "y": 200
+      },
       "data": {
         "method": "GET",
         "url": "https://httpbin.org/get?userId={{var.userId}}",
         "headers": {},
-        "timeout": 30000
+        "timeout": 30000,
+        "label": "获取用户"
       }
     },
     {
       "id": "py1",
       "type": "python",
-      "position": { "x": 480, "y": 200 },
+      "position": {
+        "x": 480,
+        "y": 200
+      },
       "data": {
         "inputMapping": {
           "response": "ctx.http1.output.data"
@@ -43,39 +54,74 @@
         "outputMapping": {
           "result": "OUTPUT"
         },
-        "outputVar": "OUTPUT"
+        "outputVar": "OUTPUT",
+        "label": "计算评分"
       }
     },
     {
       "id": "branch1",
       "type": "branch",
-      "position": { "x": 680, "y": 200 },
+      "position": {
+        "x": 680,
+        "y": 200
+      },
       "data": {
-        "condition": "ctx.py1.output.result.score >= 80"
+        "condition": "ctx.py1.output.result.score >= 80",
+        "label": "评分判断"
       }
     },
     {
       "id": "end1",
       "type": "end",
-      "position": { "x": 880, "y": 120 },
+      "position": {
+        "x": 880,
+        "y": 120
+      },
       "data": {
-        "resultExpression": "ctx.py1.output.result"
+        "resultExpression": "ctx.py1.output.result",
+        "label": "高分结果"
       }
     },
     {
       "id": "end2",
       "type": "end",
-      "position": { "x": 880, "y": 280 },
+      "position": {
+        "x": 880,
+        "y": 280
+      },
       "data": {
-        "resultExpression": "ctx.py1.output.result"
+        "resultExpression": "ctx.py1.output.result",
+        "label": "常规结果"
       }
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start1", "target": "http1" },
-    { "id": "e2", "source": "http1", "target": "py1" },
-    { "id": "e3", "source": "py1", "target": "branch1" },
-    { "id": "e4", "source": "branch1", "target": "end1", "label": "true" },
-    { "id": "e5", "source": "branch1", "target": "end2", "label": "false" }
+    {
+      "id": "e1",
+      "source": "start1",
+      "target": "http1"
+    },
+    {
+      "id": "e2",
+      "source": "http1",
+      "target": "py1"
+    },
+    {
+      "id": "e3",
+      "source": "py1",
+      "target": "branch1"
+    },
+    {
+      "id": "e4",
+      "source": "branch1",
+      "target": "end1",
+      "label": "true"
+    },
+    {
+      "id": "e5",
+      "source": "branch1",
+      "target": "end2",
+      "label": "false"
+    }
   ]
 }

@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { RegisteredApi, Workflow } from '../types/index.js'
+import type { RegisteredApi, Workflow, WorkflowSummary, Execution, ExecutionPage, ExecutionQuery } from '../types/index.js'
 
 const client = axios.create({ baseURL: '/api' })
 
@@ -11,11 +11,11 @@ export const apiApi = {
 }
 
 export const workflowApi = {
-  list: () => client.get('/workflows').then((r) => r.data),
+  list: () => client.get<WorkflowSummary[]>('/workflows').then((r) => r.data),
   get: (id: number) => client.get(`/workflows/${id}`).then((r) => r.data as Workflow),
   create: (wf: Workflow) => client.post('/workflows', wf),
   update: (id: number, wf: Workflow) => client.put(`/workflows/${id}`, wf),
-  execute: (id: number, variables: Record<string, any>) => client.post(`/workflows/${id}/execute`, { variables }).then((r) => r.data),
+  execute: (id: number, variables: Record<string, any>, requestId?: string) => client.post(`/workflows/${id}/execute`, { variables, requestId }, requestId ? { headers: { 'Idempotency-Key': requestId } } : undefined).then((r) => r.data),
   publish: (id: number, publishPath: string) => client.post(`/workflows/${id}/publish`, { publish_path: publishPath }).then((r) => r.data as Workflow),
   unpublish: (id: number) => client.post(`/workflows/${id}/unpublish`).then((r) => r.data as Workflow)
 }
@@ -25,6 +25,7 @@ export const runApi = {
 }
 
 export const executionApi = {
-  get: (id: number) => client.get(`/executions/${id}`).then((r) => r.data),
-  events: (id: number) => new EventSource(`/api/executions/${id}/events`)
+  list: (params: ExecutionQuery) => client.get<ExecutionPage>('/executions', { params }).then((r) => r.data),
+  get: (id: number) => client.get<Execution>(`/executions/${id}`).then((r) => r.data),
+  events: (id: number, lastEventId?: string) => new EventSource(`/api/executions/${id}/events${lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : ''}`)
 }

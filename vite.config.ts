@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
+    watch: { ignored: ['**/output/**', '**/data/**'] },
     proxy: {
       '/api/': {
         target: 'http://localhost:3000',

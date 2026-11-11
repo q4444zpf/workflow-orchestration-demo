@@ -1,13 +1,19 @@
 import { Router } from 'express'
 import { db, getWorkflow } from '../db/index.js'
-import { executeWorkflow } from '../services/executor.js'
-import { emitExecutionEvent, clearExecutionBuffer } from '../services/executionEvents.js'
+import { startWorkflowExecution } from '../services/executionService.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 import { HttpError } from '../middleware/errorHandler.js'
 import { validateId, validateWorkflow } from '../middleware/validation.js'
+import { assertValidWorkflowGraph } from '../services/workflowValidator.js'
 
 const router = Router()
 const runRouter = Router()
+
+function requestKey(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9_.:-]{1,128}$/.test(value)) throw new HttpError(400, '请求标识必须为不超过 128 个字符的字母、数字或安全分隔符')
+  return value
+}
 
 function validatePublishPath(path: unknown): string {
   if (!path || typeof path !== 'string' || path.trim().length === 0) {
@@ -52,9 +58,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
 router.post('/', asyncHandler(async (req, res) => {
   const wf = validateWorkflow(req.body)
   const info = await db.prepare(`
-    INSERT INTO workflows (name, description, variables, nodes, edges)
-    VALUES (?, ?, ?, ?, ?)
-  `).run([wf.name, wf.description || null, JSON.stringify(wf.variables || []), JSON.stringify(wf.nodes), JSON.stringify(wf.edges)])
+    INSERT INTO workflows (name, description, variables, nodes, edges, schema_version)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run([wf.name, wf.description || null, JSON.stringify(wf.variables || []), JSON.stringify(wf.nodes), JSON.stringify(wf.edges), wf.schema_version])
   res.status(201).json({ id: info.lastID })
 }))
 
@@ -65,9 +71,9 @@ router.put('/:id', asyncHandler(async (req, res) => {
   if (!existing) throw new HttpError(404, 'Workflow not found')
   await db.prepare(`
     UPDATE workflows
-    SET name=?, description=?, variables=?, nodes=?, edges=?, updated_at=CURRENT_TIMESTAMP
+    SET name=?, description=?, variables=?, nodes=?, edges=?, schema_version=?, updated_at=CURRENT_TIMESTAMP
     WHERE id=?
-  `).run([wf.name, wf.description || null, JSON.stringify(wf.variables || []), JSON.stringify(wf.nodes), JSON.stringify(wf.edges), id])
+  `).run([wf.name, wf.description || null, JSON.stringify(wf.variables || []), JSON.stringify(wf.nodes), JSON.stringify(wf.edges), wf.schema_version, id])
   res.json({ updated: true })
 }))
 
@@ -75,8 +81,8 @@ router.post('/:id/execute', asyncHandler(async (req, res) => {
   const id = validateId(req.params.id)
   const row = await getWorkflow(id)
   if (!row) throw new HttpError(404, 'Workflow not found')
-  const variables = req.body.variables || {}
-  const executionId = await persistAndExecuteWorkflow(row, variables)
+  const variables = req.body?.variables === undefined ? {} : req.body.variables
+  const executionId = await persistAndExecuteWorkflow(row, variables, requestKey(req.get('Idempotency-Key') || req.body?.requestId))
   res.json({ executionId })
 }))
 
@@ -85,6 +91,7 @@ router.post('/:id/publish', asyncHandler(async (req, res) => {
   const existing = await getWorkflow(id)
   if (!existing) throw new HttpError(404, 'Workflow not found')
   const publishPath = validatePublishPath(req.body.publish_path)
+  assertValidWorkflowGraph({ nodes: JSON.parse(existing.nodes), edges: JSON.parse(existing.edges) })
   const conflict = await db.prepare('SELECT id FROM workflows WHERE publish_path=? AND is_published=1 AND id != ?')
     .get<{ id: number }>([publishPath, id])
   if (conflict) throw new HttpError(409, 'Publish path already in use')
@@ -104,69 +111,14 @@ router.post('/:id/unpublish', asyncHandler(async (req, res) => {
   res.json(toWorkflowSummary(row))
 }))
 
-async function persistAndExecuteWorkflow(row: NonNullable<Awaited<ReturnType<typeof getWorkflow>>>, variables: Record<string, any>) {
-  const workflow = {
-    id: row.id,
-    name: row.name,
-    description: row.description || undefined,
+async function persistAndExecuteWorkflow(row: NonNullable<Awaited<ReturnType<typeof getWorkflow>>>, inputs: unknown, requestKey?: string) {
+  const workflow = validateWorkflow({
+    schema_version: row.schema_version,
+    name: row.name, description: row.description || undefined,
     variables: row.variables ? JSON.parse(row.variables) : [],
-    nodes: JSON.parse(row.nodes),
-    edges: JSON.parse(row.edges)
-  }
-  const startedAt = new Date().toISOString()
-  const insertInfo = await db.prepare(`
-    INSERT INTO executions (workflow_id, status, context, logs, result, started_at, ended_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run([
-    workflow.id,
-    'running',
-    JSON.stringify({}),
-    JSON.stringify([]),
-    JSON.stringify(null),
-    startedAt,
-    null
-  ])
-  const executionId = insertInfo.lastID as number
-
-  setImmediate(() => {
-    (async () => {
-      try {
-        const execution = await executeWorkflow(workflow, variables, (event) => {
-          emitExecutionEvent(executionId, event)
-        })
-
-        await db.prepare(`
-          UPDATE executions
-          SET status=?, context=?, logs=?, result=?, ended_at=?
-          WHERE id=?
-        `).run([
-          execution.status,
-          JSON.stringify(execution.context),
-          JSON.stringify(execution.logs),
-          JSON.stringify(execution.result),
-          execution.ended_at,
-          executionId
-        ])
-      } catch (err: any) {
-        await db.prepare(`
-          UPDATE executions
-          SET status=?, logs=?, ended_at=?
-          WHERE id=?
-        `).run([
-          'failed',
-          JSON.stringify([{ time: new Date().toISOString(), nodeId: '', level: 'error', message: err.message }]),
-          new Date().toISOString(),
-          executionId
-        ])
-      } finally {
-        clearExecutionBuffer(executionId)
-      }
-    })().catch((err) => {
-      console.error('Unhandled error in workflow execution background task', err)
-    })
+    nodes: JSON.parse(row.nodes), edges: JSON.parse(row.edges)
   })
-
-  return executionId
+  return startWorkflowExecution({ ...workflow, id: row.id }, inputs, requestKey)
 }
 
 runRouter.post('/:publish_path', asyncHandler(async (req, res) => {
@@ -175,7 +127,7 @@ runRouter.post('/:publish_path', asyncHandler(async (req, res) => {
     .get<NonNullable<Awaited<ReturnType<typeof getWorkflow>>>>(publishPath)
   if (!row) throw new HttpError(404, 'Published workflow not found')
   const variables = req.body || {}
-  const executionId = await persistAndExecuteWorkflow(row, variables)
+  const executionId = await persistAndExecuteWorkflow(row, variables, requestKey(req.get('Idempotency-Key')))
   res.json({ executionId })
 }))
 
