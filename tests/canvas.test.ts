@@ -3,6 +3,39 @@ import { it, expect, vi } from 'vitest'
 import { useVueFlow, VueFlow } from '@vue-flow/core'
 import { defineComponent, ref } from 'vue'
 import FlowCanvas from '../src/components/FlowCanvas.vue'
+import NodeLibrary from '../src/components/NodeLibrary.vue'
+
+it('节点库的基础节点和已注册 API 都有按钮添加入口', async () => {
+  const api = { id: 1, name: '取分数', method: 'POST' as const, url: 'https://example.com' }
+  const wrapper = mount(NodeLibrary, { props: { apis: [api] }, global: { stubs: ['router-link'] } })
+  await wrapper.get('button[aria-label="添加 Python 节点"]').trigger('click')
+  await wrapper.get('button[aria-label="添加 API 取分数"]').trigger('click')
+  expect(wrapper.emitted('add-node')).toEqual([['python'], ['http', api]])
+  wrapper.unmount()
+})
+
+it('连线表单按选中的分支出口添加稳定 ID 的连线，并拒绝重复使用该出口', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })
+  const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800)
+  const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600)
+  const nodes = [
+    { id: 'b', type: 'branch', position: { x: 0, y: 0 }, data: { branches: [{ id: 'high', label: '高分', condition: 'true' }, { id: 'other', label: '默认', isDefault: true }] } },
+    { id: 'e', type: 'end', position: { x: 200, y: 0 }, data: {} }
+  ]
+  const wrapper = mount(FlowCanvas, { props: { nodes, edges: [] } })
+  try {
+    await wrapper.get('button[aria-label="添加连线"]').trigger('click')
+    await wrapper.get('select[aria-label="起点节点"]').setValue('b')
+    await wrapper.get('select[aria-label="起点出口"]').setValue('high')
+    await wrapper.get('select[aria-label="终点节点"]').setValue('e')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(wrapper.emitted('update:edges')?.at(-1)?.[0]).toEqual([expect.objectContaining({ source: 'b', target: 'e', sourceHandle: 'high', branchId: 'high', label: '高分' })])
+    await wrapper.get('button[aria-label="添加连线"]').trigger('click')
+    await wrapper.get('select[aria-label="起点节点"]').setValue('b')
+    expect(wrapper.find('option[value="high"]').exists()).toBe(false)
+    expect(wrapper.find('option[value="other"]').exists()).toBe(true)
+  } finally { wrapper.unmount(); width.mockRestore(); height.mockRestore(); vi.unstubAllGlobals() }
+})
 
 it('少量节点自动适应和手动适应最多100%，仍允许用户主动放大', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })

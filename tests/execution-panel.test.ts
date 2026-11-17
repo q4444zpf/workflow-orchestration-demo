@@ -1,5 +1,5 @@
-import { mount } from '@vue/test-utils'
-import { describe, it, expect } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, it, expect, vi } from 'vitest'
 import ExecutionPanel from '../src/components/ExecutionPanel.vue'
 
 const nodes = [
@@ -13,6 +13,37 @@ const execution = { id: 1, workflow_id: 1, status: 'success' as const,
       startedAt: '2026-11-09T12:00:00.000Z', endedAt: '2026-11-09T12:00:00.600Z' }
   }, logs: [{ time: '2026-11-09T12:00:00Z', nodeId: 'py', level: 'info' as const, message: 'Finished python' }], result: { score: 100 } }
 describe('执行调试台', () => {
+  it('HTTP 异常展示执行快照的节点名、请求方法和状态码，保留错误原文', () => {
+    const snapshot = { ...nodes[1], type: 'http', data: { label: '取评分', method: 'POST' } }
+    const wrapper = mount(ExecutionPanel, { props: {
+      nodes, selectedNodeId: 'py', execution: { ...execution, status: 'failed',
+        workflow_snapshot: { name: '评分流程', nodes: [snapshot], edges: [] },
+        context: { py: { status: 'failed', input: {}, output: null, error: 'HTTP request failed: 422' } }
+      }
+    } })
+    expect(wrapper.text()).toContain('节点“取评分”的 POST 请求失败，HTTP 状态码 422。')
+    expect(wrapper.get('[data-testid="node-output"]').text()).toBe('HTTP request failed: 422')
+    wrapper.unmount()
+  })
+  it('复制失败节点时写入面板显示的实际错误文本', async () => {
+    const error = 'Python 执行失败\nValueError: 无效的评分'
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const wrapper = mount(ExecutionPanel, { props: {
+      nodes, selectedNodeId: 'py', execution: { ...execution, status: 'failed', context: {
+        ...execution.context, py: { ...execution.context.py, status: 'failed', output: null, error }
+      } }
+    } })
+    try {
+      expect(wrapper.get('[data-testid="node-output"]').text()).toBe(error)
+      await wrapper.get('[aria-label="复制输出"]').trigger('click'); await flushPromises()
+      expect(writeText).toHaveBeenCalledWith(error)
+      expect(wrapper.get('[aria-label="复制输出"]').text()).toContain('已复制')
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
   it('同一节点的循环和重试记录独立选择，实时更新不会切走正在检查的历史记录', async () => {
     const runs = [
       { invocationId: 'loop-0-py', nodeId: 'py', scopePath: 'root/loop:0', attempt: 1, status: 'failed' as const, input: { item: '第一轮' }, output: null, error: '暂时失败', startedAt: '2026-11-09T12:00:00Z' },

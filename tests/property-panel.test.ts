@@ -5,6 +5,20 @@ vi.mock('monaco-editor', () => ({ editor: { create: vi.fn() } }))
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: class {} }))
 vi.mock('element-plus', () => ({ ElMessage: { error: vi.fn(), success: vi.fn() }, ElMessageBox: { confirm: vi.fn().mockResolvedValue('confirm') } }))
 
+it('未配置方法的旧 HTTP 节点显示 GET，实际编辑时才更新定义', async () => {
+  const node = { id: 'http', type: 'http', position: { x: 0, y: 0 }, data: { url: 'https://example.com' } }
+  const wrapper = mount(PropertyPanel, { props: { node, apis: [] }, global: { stubs: {
+    'el-form': { template: '<form><slot /></form>' }, 'el-form-item': { template: '<div><slot /></div>' }, 'el-input': true, 'el-select': true, 'el-option': true
+  } } })
+  await flushPromises()
+  const method = wrapper.get<HTMLSelectElement>('select[aria-label="请求方法"]')
+  expect(method.element.value).toBe('GET')
+  expect(wrapper.emitted('update:node')).toBeUndefined()
+  await method.setValue('POST')
+  expect(wrapper.emitted('update:node')?.at(-1)?.[0]).toMatchObject({ data: { method: 'POST' } })
+  wrapper.unmount()
+})
+
 it('开始节点通过可视化表格选择运行参数，切换全量输出不再填写JSON', async () => {
   const start = { id: 'start', type: 'start', position: { x: 0, y: 0 }, data: {} }
   const wrapper = mount(PropertyPanel, { props: { node: start, apis: [], workflow: { name: '参数表单', nodes: [start], edges: [], variables: [{ name: 'score', type: 'number' }] } }, global: { stubs: {

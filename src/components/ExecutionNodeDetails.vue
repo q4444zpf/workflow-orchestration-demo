@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { Execution, NodeExecutionState } from '../types'
-import { executionStatus, formatData, formatDuration, formatTime } from './executionFormatting'
+import { executionStatus, formatData, formatDuration, formatTime, httpFailureSummary } from './executionFormatting'
 const props = defineProps<{ execution: Execution }>()
 const names = computed(() => Object.fromEntries((props.execution.workflow_snapshot?.nodes || []).map(node => [node.id, typeof node.data.label === 'string' ? node.data.label : node.id])))
 interface Row { key: string; nodeId: string; invocationId?: string; scopePath?: string; attempt?: number; state: NodeExecutionState }
@@ -11,13 +11,21 @@ const rows = computed<Row[]>(() => props.execution.nodeRuns?.length
 const selected = ref('')
 watch(() => props.execution.id, () => { selected.value = '' })
 const current = computed(() => rows.value.find(row => row.key === selected.value) || rows.value[0])
+const httpFailure = computed(() => httpFailureSummary(
+  props.execution.workflow_snapshot?.nodes.find(node => node.id === current.value?.nodeId), current.value?.state.error
+))
 </script>
 
 <template>
   <section class="management-card node-history"><div class="section-heading"><h2>节点执行记录</h2><span class="muted">{{ rows.length }} 次尝试 · 循环与重试分别记录</span></div>
     <p v-if="!rows.length" class="empty-state">暂无节点执行记录</p>
     <div v-else class="node-history-grid"><div class="history-node-list" aria-label="节点调用列表"><button v-for="row in rows" :key="row.key" class="history-node-row" :data-run-key="row.key" :aria-pressed="current?.key === row.key" @click="selected = row.key"><span class="node-row-heading"><strong :title="names[row.nodeId] || row.nodeId">{{ names[row.nodeId] || row.nodeId }}</strong><span class="status-badge" :class="row.state.status">{{ executionStatus(row.state.status) }}</span></span><small class="node-identity"><span class="node-id" :title="row.nodeId">{{ row.nodeId }}</span><span v-if="row.attempt" class="node-attempt">第 {{ row.attempt }} 次尝试</span></small><small class="node-row-footer"><span :title="row.scopePath">{{ row.scopePath || '历史调用' }}</span><span>{{ formatDuration(row.state.startedAt, row.state.endedAt, row.state.status === 'running') }}</span></small></button></div>
-      <div v-if="current" class="history-node-content"><h3 class="current-node-title">{{ names[current.nodeId] || current.nodeId }}</h3><dl class="record-metadata"><div><dt>开始时间</dt><dd>{{ formatTime(current.state.startedAt) }}</dd></div><div><dt>结束时间</dt><dd>{{ formatTime(current.state.endedAt) }}</dd></div><div><dt>耗时</dt><dd>{{ formatDuration(current.state.startedAt, current.state.endedAt, current.state.status === 'running') }}</dd></div><div v-if="current.invocationId"><dt>调用 ID</dt><dd>{{ current.invocationId }}</dd></div></dl><div v-if="current.state.error" class="error-notice" tabindex="0" role="region" aria-label="节点异常内容"><strong>节点异常</strong><pre data-testid="history-node-error">{{ current.state.error }}</pre></div><div class="value-columns"><section class="value-box"><h3>节点输入</h3><pre tabindex="0" aria-label="节点输入数据" data-testid="history-node-input">{{ formatData(current.state.input) }}</pre></section><section class="value-box"><h3>节点输出</h3><pre tabindex="0" aria-label="节点输出数据" data-testid="history-node-output">{{ formatData(current.state.output) }}</pre></section></div></div>
+      <div v-if="current" class="history-node-content"><h3 class="current-node-title">{{ names[current.nodeId] || current.nodeId }}</h3><dl class="record-metadata"><div><dt>开始时间</dt><dd>{{ formatTime(current.state.startedAt) }}</dd></div><div><dt>结束时间</dt><dd>{{ formatTime(current.state.endedAt) }}</dd></div><div><dt>耗时</dt><dd>{{ formatDuration(current.state.startedAt, current.state.endedAt, current.state.status === 'running') }}</dd></div><div v-if="current.invocationId"><dt>调用 ID</dt><dd>{{ current.invocationId }}</dd></div></dl>
+        <div v-if="current.state.error" class="error-notice" tabindex="0" role="region" aria-label="节点异常内容">
+          <strong>节点异常</strong><p v-if="httpFailure" class="http-failure">{{ httpFailure }}</p><pre data-testid="history-node-error">{{ current.state.error }}</pre>
+        </div>
+        <div class="value-columns"><section class="value-box"><h3>节点输入</h3><pre tabindex="0" aria-label="节点输入数据" data-testid="history-node-input">{{ formatData(current.state.input) }}</pre></section><section class="value-box"><h3>节点输出</h3><pre tabindex="0" aria-label="节点输出数据" data-testid="history-node-output">{{ formatData(current.state.output) }}</pre></section></div>
+      </div>
     </div>
   </section>
 </template>
@@ -46,6 +54,7 @@ const current = computed(() => rows.value.find(row => row.key === selected.value
 .history-node-content .record-metadata dd { font-size: 12px; }
 .history-node-content .record-metadata dt { margin-bottom: 5px; }
 .history-node-content .error-notice { margin: 0; max-height: 110px; overflow: auto; flex-shrink: 0; }
+.http-failure { margin: 6px 0 0; overflow-wrap: anywhere; }
 .history-node-content .value-columns { flex: 1; min-height: 120px; grid-template-rows: minmax(0, 1fr); gap: 16px; }
 .history-node-content .value-box { display: flex; flex-direction: column; min-height: 0; }
 .history-node-content .value-box h3 { flex-shrink: 0; }

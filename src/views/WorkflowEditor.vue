@@ -20,11 +20,11 @@
     </header>
     <div v-if="selectedEdge" class="edge-editor"><template v-if="selectedEdgeBranches.length"><span>分支出口</span><select aria-label="连线分支出口" :value="selectedEdge.branchId || selectedEdge.sourceHandle || selectedEdge.label" @change="onUpdateEdgeBranch"><option v-for="branch in selectedEdgeBranches" :key="branch.id" :value="branch.id">{{ branch.label }}{{ branch.isDefault ? '（默认）' : '' }}</option></select></template><template v-else><span>连线标签</span><el-input v-model="selectedEdge.label" placeholder="body / next / fork-N / join" style="width:340px" @change="onUpdateEdgeLabel" /></template><el-button text @click="selectedEdge = null">关闭</el-button></div>
     <div class="editor-body">
-      <NodeLibrary :apis="apis" />
+      <NodeLibrary :apis="apis" @add-node="(type, api) => canvas?.addNodeFromLibrary(type, api)" />
       <main ref="workspaceRef" class="canvas-workspace">
         <WorkflowValidationPanel v-if="showValidation" :issues="validationIssues" @select-issue="selectValidationIssue" @close="showValidation = false" />
         <div class="graph-workspace">
-          <FlowCanvas v-model:nodes="workflow.nodes" v-model:edges="workflow.edges" :execution="execution" @node-click="onNodeClick" @edge-click="onEdgeClick" @delete-nodes="requestDeleteNodes" />
+          <FlowCanvas ref="canvas" v-model:nodes="workflow.nodes" v-model:edges="workflow.edges" :execution="execution" @node-click="onNodeClick" @edge-click="onEdgeClick" @delete-nodes="requestDeleteNodes" />
           <PropertyPanel v-model:node="selectedNode" :apis="apis" :workflow="workflow" @update:node="onUpdateNode" @delete-node="deleteNode" />
         </div>
         <div class="monitor-divider" role="separator" tabindex="0" aria-label="调整执行监控高度" aria-orientation="horizontal" :aria-valuenow="monitorHeight" aria-valuemin="220" :aria-valuemax="maxMonitorHeight" @pointerdown="startMonitorResize" @keydown.up.prevent="resizeMonitor(24)" @keydown.down.prevent="resizeMonitor(-24)"><MoreFilled /></div>
@@ -59,7 +59,7 @@ import type { WorkflowValidationIssue } from '../../server/src/shared/workflowVa
 import { nodeName } from '../components/nodePresentation'
 import { getBranchDefinitions } from '../../server/src/shared/branches'
 import { syncBranchEdge, configuredBranchIds } from '../components/branchEdges'
-import type { Workflow, RegisteredApi, TypedNode, FlowEdge } from '../types/index.js'
+import type { Workflow, RegisteredApi, TypedNode, FlowNode, FlowEdge } from '../types/index.js'
 
 function isTypedNode(node: Node): node is TypedNode {
   return (
@@ -74,6 +74,7 @@ function isTypedNode(node: Node): node is TypedNode {
 
 const route = useRoute()
 const router = useRouter()
+const canvas = ref<InstanceType<typeof FlowCanvas>>()
 const workflow = ref<Workflow>({ name: '新流程', nodes: [], edges: [] })
 const showValidation = shallowRef(false)
 const validationIssues = computed(() => [...validateWorkflowGraph(workflow.value), ...invalidReferenceIssues(workflow.value)])
@@ -199,14 +200,21 @@ const isPublishPathValid = computed(() => {
 })
 let disposed = false
 
+function withoutSelection<T extends FlowNode | FlowEdge>(item: T): T {
+  const definition: T & { selected?: boolean } = { ...item }
+  delete definition.selected
+  return definition
+}
+
 onMounted(async () => {
   window.addEventListener('resize', onViewportResize)
   try {
     apis.value = await apiApi.list()
     const id = route.params.id
     if (id) {
-      workflow.value = await workflowApi.get(Number(id))
-      workflow.value.edges = workflow.value.edges.map(edge => syncBranchEdge(edge, workflow.value.nodes))
+      const stored = await workflowApi.get(Number(id))
+      const nodes = stored.nodes.map(withoutSelection)
+      workflow.value = { ...stored, nodes, edges: stored.edges.map(edge => syncBranchEdge(withoutSelection(edge), nodes)) }
       publishPath.value = workflow.value.publish_path || ''
       savedFingerprint.value = fingerprint.value
     }
@@ -219,10 +227,15 @@ async function save(): Promise<boolean> {
   saving.value = true
   const saved = fingerprint.value
   try {
+    const definition = {
+      ...workflow.value,
+      nodes: workflow.value.nodes.map(withoutSelection),
+      edges: workflow.value.edges.map(withoutSelection)
+    }
     if (workflow.value.id) {
-      await workflowApi.update(workflow.value.id, workflow.value)
+      await workflowApi.update(workflow.value.id, definition)
     } else {
-      const res = await workflowApi.create(workflow.value)
+      const res = await workflowApi.create(definition)
       workflow.value.id = res.data.id
     }
     savedFingerprint.value = saved

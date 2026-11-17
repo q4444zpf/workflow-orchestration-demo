@@ -15,7 +15,7 @@ function submit() { const result = resolveParameterValues(props.definitions, val
     <form @submit.prevent="submit">
       <p class="intro">按字段填写本次运行参数。默认值已自动填入。</p>
       <div v-if="!definitions.length" class="empty">本流程尚未定义输入参数。<button type="button" @click="emit('configure')">前往参数配置</button>，也可直接以空参数运行。</div>
-      <div v-for="field in definitions" :key="field.name" class="run-field"><label>{{ field.name }}<b v-if="field.required"> *</b><small>{{ field.description }}</small></label><ParameterValueEditor :schema="field" :value="values[field.name]" :path="field.name" @update:value="update(field.name, $event)" /><p v-for="issue in issues.filter(item => item.path === field.name || item.path.startsWith(field.name + '.'))" :key="issue.path" role="alert" class="error">{{ issue.message }}</p></div>
+      <div v-for="field in definitions" :key="field.name" class="run-field"><label>{{ field.name }}<b v-if="field.required"> *</b><small>{{ field.description }}</small></label><ParameterValueEditor :schema="field" :value="values[field.name]" :path="field.name" show-default-fallback @update:value="update(field.name, $event)" /><p v-for="issue in issues.filter(item => item.path === field.name || item.path.startsWith(field.name + '.'))" :key="issue.path" role="alert" class="error">{{ issue.message }}</p></div>
       <p v-for="issue in issues.filter(item => item.path === 'parameters')" :key="issue.path" role="alert" class="error">{{ issue.message }}</p>
       <footer><button type="button" aria-label="取消运行" @click="emit('cancel')">取消</button><button type="submit" class="primary">运行</button></footer>
     </form>

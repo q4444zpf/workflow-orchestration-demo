@@ -24,13 +24,13 @@
           <span class="row-name">{{ row.name }}<small v-if="row.run" class="run-scope">{{ row.run.scopePath }} · 第 {{ row.run.attempt }} 次尝试</small></span><span class="row-time">{{ nodeTime(row.state) }}</span>
         </button>
       </div>
-      <div class="data-box"><div class="data-heading"><h3>输入</h3><button aria-label="复制输入" @click="copyValue(currentState?.input, 'input')"><CopyDocument />{{ copied === 'input' ? '已复制' : '复制' }}</button></div><pre data-testid="node-input">{{ formatValue(currentState?.input) }}</pre></div>
-      <div class="data-box"><div class="data-heading"><h3>输出</h3><button aria-label="复制输出" @click="copyValue(currentState?.output, 'output')"><CopyDocument />{{ copied === 'output' ? '已复制' : '复制' }}</button></div><pre data-testid="node-output">{{ currentState?.error || formatValue(currentState?.output) }}</pre></div>
+      <div class="data-box"><div class="data-heading"><h3>输入</h3><button aria-label="复制输入" @click="copyText(formatValue(currentState?.input), 'input')"><CopyDocument />{{ copied === 'input' ? '已复制' : '复制' }}</button></div><pre data-testid="node-input">{{ formatValue(currentState?.input) }}</pre></div>
+      <div class="data-box"><div class="data-heading"><h3>输出</h3><button aria-label="复制输出" @click="copyText(outputText, 'output')"><CopyDocument />{{ copied === 'output' ? '已复制' : '复制' }}</button></div><p v-if="httpFailure" class="http-failure">{{ httpFailure }}</p><pre data-testid="node-output">{{ outputText }}</pre></div>
     </div>
     <div v-else-if="activeTab === 'logs'" id="execution-logs" role="tabpanel" class="log-list">
       <div v-for="(log, index) in execution.logs" :key="index" class="log-row" :class="log.level"><time>{{ new Date(log.time).toLocaleTimeString('zh-CN', { hour12: false }) }}</time><strong>{{ names[log.nodeId] || log.nodeId || '系统' }}</strong><span>{{ log.message }}</span></div><p v-if="!execution.logs.length">暂无日志</p>
     </div>
-    <div v-else id="execution-result" role="tabpanel" class="result-view"><div class="data-heading"><h3>最终结果</h3><button aria-label="复制最终结果" @click="copyValue(execution.result, 'result')"><CopyDocument />{{ copied === 'result' ? '已复制' : '复制' }}</button></div><pre>{{ execution.status === 'running' ? '执行中，结果将在完成后显示' : formatValue(execution.result) }}</pre></div>
+    <div v-else id="execution-result" role="tabpanel" class="result-view"><div class="data-heading"><h3>最终结果</h3><button aria-label="复制最终结果" @click="copyText(formatValue(execution.result), 'result')"><CopyDocument />{{ copied === 'result' ? '已复制' : '复制' }}</button></div><pre>{{ execution.status === 'running' ? '执行中，结果将在完成后显示' : formatValue(execution.result) }}</pre></div>
     <p v-if="copyError" class="copy-error" role="alert">复制失败，请手动选择文本复制</p>
   </section>
 </template>
@@ -38,6 +38,7 @@
 import { computed, ref, shallowRef, watch, onBeforeUnmount } from 'vue'
 import { CircleCheckFilled, CircleCloseFilled, Loading, Remove, CopyDocument, VideoPlay } from '@element-plus/icons-vue'
 import { nodeName } from './nodePresentation'
+import { httpFailureSummary } from './executionFormatting'
 import type { Execution, FlowNode, NodeExecutionState, NodeRun } from '../types'
 const props = defineProps<{ execution: Execution | null; selectedNodeId: string | null; nodes: FlowNode[] }>()
 const emit = defineEmits<{ 'select-node': [id: string] }>()
@@ -58,6 +59,11 @@ const currentRow = computed(() => {
   return matching[matching.length - 1]
 })
 const currentState = computed(() => currentRow.value?.state)
+const httpFailure = computed(() => {
+  const nodes = props.execution?.workflow_snapshot?.nodes || props.nodes
+  return httpFailureSummary(nodes.find(node => node.id === currentRow.value?.nodeId), currentState.value?.error)
+})
+const outputText = computed(() => currentState.value?.error || formatValue(currentState.value?.output))
 const executedCount = computed(() => props.execution?.nodeRuns?.length ? new Set(props.execution.nodeRuns.map(run => run.invocationId)).size : Object.keys(props.execution?.context || {}).length)
 const attemptCount = computed(() => props.execution?.nodeRuns?.length || 0)
 watch(() => props.execution?.id, () => { selectedRunKey.value = null })
@@ -76,8 +82,8 @@ function nodeTime(state?: NodeExecutionState) {
   return duration(state.startedAt, state.endedAt)
 }
 function formatValue(value: unknown) { return value === undefined ? '暂无数据' : JSON.stringify(value, null, 2) }
-async function copyValue(value: unknown, target: string) {
-  try { await navigator.clipboard.writeText(formatValue(value)); copied.value = target; copyError.value = false; clearTimeout(copiedTimer); copiedTimer = setTimeout(() => { copied.value = '' }, 2000) }
+async function copyText(text: string, target: string) {
+  try { await navigator.clipboard.writeText(text); copied.value = target; copyError.value = false; clearTimeout(copiedTimer); copiedTimer = setTimeout(() => { copied.value = '' }, 2000) }
   catch { copyError.value = true }
 }
 onBeforeUnmount(() => clearTimeout(copiedTimer))
@@ -91,6 +97,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 .monitor-data { min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr) minmax(0, 1fr); gap: 20px; padding-top: 18px; flex: 1; }
 .node-list { min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; align-self: stretch; } .list-header { position: sticky; top: 0; display: flex; justify-content: space-between; padding: 11px 14px; color: #758199; background: #f7f9fd; font-size: 12px; z-index: 1; } .node-row { width: 100%; display: flex; align-items: center; gap: 9px; padding: 11px 14px; background: white; border: 0; border-top: 1px solid #f0f2f7; color: #27354b; text-align: left; border-left: 3px solid transparent; font-size: 14px; } .node-row svg { width: 17px; height: 17px; flex-shrink: 0; } .node-row:hover { background: #f4f8ff; } .node-row.active { background: #eaf2ff; border-left-color: #1677ff; font-weight: 600; } .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .row-time { margin-left: auto; color: #7b8799; font-size: 12px; white-space: nowrap; }
 .data-box { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; background: #fbfcff; overflow: hidden; } .data-heading { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; } h3 { font-size: 14px; margin: 0; font-weight: 600; } .data-heading button { display: flex; align-items: center; gap: 6px; border: 0; background: none; color: #738199; font-size: 12px; } .data-heading button svg { width: 15px; height: 15px; } pre { margin: 0; padding: 16px; font: 13px/1.8 'Cascadia Code', Consolas, monospace; color: #23314b; overflow: auto; tab-size: 2; }
+.http-failure { margin: 12px 16px 0; color: #a32d2d; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .log-list, .result-view { overflow: auto; min-height: 0; flex: 1; margin-top: 16px; } .log-row { display: flex; gap: 24px; padding: 9px 4px; border-bottom: 1px solid #f0f2f7; font: 12px/1.6 Consolas, monospace; } .log-row time { color: #8490a3; } .log-row strong { min-width: 100px; font-weight: 500; } .log-row.error { color: #d84848; } .monitor-empty { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; color: #8a96a9; font-size: 13px; } .monitor-empty svg { width: 24px; height: 24px; color: #99b4da; } .monitor-empty strong { color: #5a6b83; font-weight: 500; } .copy-error { color: #d84848; font-size: 12px; margin: 4px 0; }
 @media (max-width: 1150px) { .monitor-data { grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; } .execution-panel { padding: 14px 16px 18px; } .monitor-header { gap: 16px; } }
 </style>

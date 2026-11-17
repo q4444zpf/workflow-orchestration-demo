@@ -11,7 +11,7 @@
         <template v-if="node.type === 'end'"><div class="config-section"><label>最终输出结果</label><ResultMappingEditor :expression="localData.resultExpression" :mapping="localData.resultMapping" :workflow="currentWorkflow" :node-id="node.id" @change="Object.assign(localData, $event)" /></div></template>
         <template v-if="node.type === 'http'">
           <el-form-item label="已注册 API"><el-select v-model="selectedApiId" placeholder="选择 API" @change="onApiChange"><el-option v-for="api in apis" :key="api.id" :label="api.name" :value="api.id" /></el-select></el-form-item>
-          <el-form-item label="请求方法"><el-select v-model="localData.method"><el-option v-for="method in ['GET', 'POST', 'PUT', 'DELETE']" :key="method" :label="method" :value="method" /></el-select></el-form-item>
+          <el-form-item label="请求方法"><select v-model="requestMethod" class="config-select" aria-label="请求方法"><option v-for="method in ['GET', 'POST', 'PUT', 'DELETE']" :key="method" :value="method">{{ method }}</option></select></el-form-item>
           <el-form-item label="请求地址"><el-input v-model="localData.url" placeholder="https://example.com/api" /></el-form-item>
           <HttpParametersEditor :model-value="localData" :workflow="currentWorkflow" :node-id="node.id" @change="Object.assign(localData, $event)" />
           <div class="config-section"><label>响应输出</label><OutputMappingEditor :model-value="localData.outputMapping" base="RESULT" :schema="httpResponseSchema" allow-passthrough @update:model-value="localData.outputMapping = $event" /></div>
@@ -29,7 +29,7 @@
         <p v-if="node.type === 'parallel'" class="field-help">将分支连线标为 fork-0、fork-1 等，汇合连线标为 join。</p>
         <details v-if="node.type === 'http' || node.type === 'python'" class="advanced-config"><summary>输出字段结构（供下游选择）</summary><ParameterSchemaEditor :model-value="localData.outputSchema?.properties || []" @update:model-value="localData.outputSchema = { type: 'object', properties: $event }" /></details>
         <details v-if="node.type === 'http' || node.type === 'python'" class="advanced-config"><summary>重试设置</summary>
-          <label v-if="node.type === 'http' && String(localData.method || 'GET').toUpperCase() !== 'GET'" class="retry-declaration"><input v-model="localData.idempotent" type="checkbox" aria-label="外部接口支持幂等" />外部接口支持幂等键去重</label>
+          <label v-if="node.type === 'http' && requestMethod !== 'GET'" class="retry-declaration"><input v-model="localData.idempotent" type="checkbox" aria-label="外部接口支持幂等" />外部接口支持幂等键去重</label>
           <label class="retry-attempts">最大尝试次数<input aria-label="最大尝试次数" type="number" :value="localData.retry?.maxAttempts || (canRetry ? 3 : 1)" min="1" :max="canRetry ? 3 : 1" @input="updateAttempts" /></label>
           <p class="field-help">{{ canRetry ? '包含首次执行，最多尝试 3 次。失败可能再次执行该节点。' : '写操作默认只尝试 1 次。仅当外部服务实际支持幂等键去重时，才能声明支持并启用重试。' }}</p>
         </details>
@@ -79,7 +79,8 @@ function changeStartMode(event: Event) { if (!(event.target instanceof HTMLSelec
 const codeExpanded = ref(false)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 let resetting = false
-const canRetry = computed(() => props.node?.type === 'python' || String(localData.method || 'GET').toUpperCase() === 'GET' || localData.idempotent === true)
+const requestMethod = computed({ get: () => String(localData.method || 'GET').toUpperCase(), set: method => { localData.method = method } })
+const canRetry = computed(() => props.node?.type === 'python' || requestMethod.value === 'GET' || localData.idempotent === true)
 async function copyNodeId() {
   const id = props.node?.id
   if (!id) return

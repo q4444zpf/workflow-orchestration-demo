@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import { type ValueSchema, isRecord, inferValueSchema, emptyValue, parameterTypeLabels, type ParameterType } from '../../../server/src/shared/parameterSchema'
-const props = defineProps<{ schema: ValueSchema; value?: unknown; path: string }>()
+const props = defineProps<{ schema: ValueSchema & { default?: unknown }; value?: unknown; path: string; showDefaultFallback?: boolean }>()
 const emit = defineEmits<{ 'update:value': [value: unknown] }>()
 const objectValue = computed(() => isRecord(props.value) ? props.value : {})
 const arrayValue = computed(() => Array.isArray(props.value) ? props.value : [])
+const defaultHintId = computed(() => props.showDefaultFallback && props.schema.default !== undefined
+  ? `run-default-${encodeURIComponent(props.path)}` : undefined)
+const defaultHint = computed(() => {
+  if (!defaultHintId.value || props.value !== undefined) return ''
+  const value = props.schema.default
+  if (Array.isArray(value)) return `留空将使用默认数组（${value.length} 项）`
+  if (isRecord(value)) return `留空将使用默认对象（${Object.keys(value).length} 个字段）`
+  return `留空将使用默认值 ${typeof value === 'string' ? `“${value}”` : String(value)}`
+})
 const fields = computed(() => {
   const declared = props.schema.properties || []
   const extras = Object.entries(objectValue.value).filter(([name]) => !declared.some(field => field.name === name)).map(([name, value]) => ({ name, ...inferValueSchema(value) }))
@@ -34,13 +43,13 @@ function scalar(event: Event) {
 </script>
 <template>
   <div class="parameter-value">
-    <input v-if="schema.type === 'string'" :aria-label="path" :value="typeof value === 'string' ? value : ''" placeholder="输入文本" @input="scalar" />
-    <input v-else-if="schema.type === 'number'" type="number" step="any" :aria-label="path" :value="typeof value === 'number' ? value : ''" placeholder="输入数字" @input="scalar" />
-    <select v-else-if="schema.type === 'boolean'" :aria-label="path" :value="typeof value === 'boolean' ? String(value) : ''" @change="scalar"><option value="">未填写</option><option value="true">是（true）</option><option value="false">否（false）</option></select>
+    <input v-if="schema.type === 'string'" :aria-label="path" :aria-describedby="defaultHintId" :value="typeof value === 'string' ? value : ''" placeholder="输入文本" @input="scalar" />
+    <input v-else-if="schema.type === 'number'" type="number" step="any" :aria-label="path" :aria-describedby="defaultHintId" :value="typeof value === 'number' ? value : ''" placeholder="输入数字" @input="scalar" />
+    <select v-else-if="schema.type === 'boolean'" :aria-label="path" :aria-describedby="defaultHintId" :value="typeof value === 'boolean' ? String(value) : ''" @change="scalar"><option value="">未填写</option><option value="true">是（true）</option><option value="false">否（false）</option></select>
     <div v-else-if="schema.type === 'object'" class="value-group">
       <div v-for="field in fields" :key="field.name" class="value-field">
         <div class="value-label"><span>{{ field.name }}<b v-if="'required' in field && field.required"> *</b></span><button v-if="!schema.properties?.some(item => item.name === field.name)" type="button" :aria-label="`删除字段 ${path}.${field.name}`" @click="setField(field.name, undefined)">删除</button></div>
-        <ParameterValueEditor :schema="field" :value="objectValue[field.name]" :path="`${path}.${field.name}`" @update:value="setField(field.name, $event)" />
+        <ParameterValueEditor :schema="field" :value="objectValue[field.name]" :path="`${path}.${field.name}`" :show-default-fallback="showDefaultFallback && value !== undefined" @update:value="setField(field.name, $event)" />
       </div>
       <div v-if="!schema.properties" class="add-key"><input v-model="newKey" :aria-label="`${path} 新字段名`" placeholder="字段名" /><select v-model="newType" :aria-label="`${path} 新字段类型`"><option v-for="(label, type) in parameterTypeLabels" :key="type" :value="type">{{ label }}</option></select><button type="button" @click="addField">添加字段</button></div>
       <small v-if="keyError" role="alert">{{ keyError }}</small>
@@ -49,11 +58,12 @@ function scalar(event: Event) {
     <div v-else class="value-group">
       <div v-for="(item, index) in arrayValue" :key="index" class="value-field">
         <div class="value-label"><span>第 {{ index + 1 }} 项</span><button type="button" :aria-label="`删除 ${path} 第${index + 1}项`" @click="emit('update:value', arrayValue.filter((_, i) => i !== index))">删除</button></div>
-        <ParameterValueEditor :schema="schema.items || inferValueSchema(item)" :value="item" :path="`${path}.${index}`" @update:value="setItem(index, $event)" />
+        <ParameterValueEditor :schema="schema.items || inferValueSchema(item)" :value="item" :path="`${path}.${index}`" :show-default-fallback="showDefaultFallback" @update:value="setItem(index, $event)" />
       </div>
       <button type="button" :aria-label="`添加 ${path} 项目`" @click="emit('update:value', [...arrayValue, emptyValue(schema.items || { type: 'string' })])">＋ 添加项目</button>
       <button v-if="value === undefined" type="button" class="subtle" @click="emit('update:value', [])">使用空数组</button>
     </div>
+    <p v-if="defaultHintId" :id="defaultHintId" class="default-hint" role="status">{{ defaultHint }}</p>
   </div>
 </template>
 <style scoped>
@@ -61,4 +71,6 @@ function scalar(event: Event) {
 .value-group { padding: 12px; border: 1px solid #e1e6ef; border-radius: 6px; background: #f9fbfe; display: grid; gap: 10px; }
 .value-label { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; } b, small { color: #cb4141; } button { padding: 5px 8px; border: 1px solid #dce3ec; border-radius: 4px; background: white; color: #1677ff; font-size: 12px; }
 .value-label button { border: 0; padding: 0; color: #8b5960; } .subtle { color: #718096; } .add-key { display: flex; gap: 6px; } .add-key select { width: 85px; } .add-key button { flex-shrink: 0; }
+.default-hint { margin: 6px 0 0; color: #526079; font-size: 13px; overflow-wrap: anywhere; }
+.default-hint:empty { margin: 0; }
 </style>

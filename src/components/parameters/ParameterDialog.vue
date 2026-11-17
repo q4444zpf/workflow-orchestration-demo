@@ -18,7 +18,7 @@ function trap(event: KeyboardEvent) {
 <template>
   <div class="parameter-backdrop" @keydown.esc.stop.prevent="emit('close')">
     <section ref="panel" class="parameter-dialog" :class="{ wide }" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1" @keydown="trap">
-      <header><h2>{{ title }}</h2><button type="button" aria-label="关闭参数窗口" @click="emit('close')">×</button></header>
+      <header><h2>{{ title }}</h2><button type="button" aria-label="关闭窗口" @click="emit('close')">×</button></header>
       <div class="parameter-dialog-body"><slot /></div>
     </section>
   </div>

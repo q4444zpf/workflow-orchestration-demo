@@ -1,3 +1,14 @@
+import type { FlowNode } from '../types'
+import { nodeName } from './nodePresentation'
+
+export function httpFailureSummary(node: FlowNode | undefined, error: string | undefined) {
+  if (node?.type !== 'http' || !error) return ''
+  const status = /^HTTP request failed: ([1-5]\d{2})$/.exec(error)?.[1]
+  if (!status) return ''
+  const method = String(node.data.method || 'GET').toUpperCase()
+  return `节点“${nodeName(node)}”的 ${method} 请求失败，HTTP 状态码 ${status}。`
+}
+
 export function formatData(value: unknown): string { return value === undefined ? '未记录' : JSON.stringify(value, null, 2) }
 function timestamp(value: string) { return Date.parse(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(value) ? value.replace(' ', 'T') + 'Z' : value) }
 export function formatTime(value?: string | null): string {

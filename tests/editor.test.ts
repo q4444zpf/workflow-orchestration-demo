@@ -43,6 +43,27 @@ function editor(showPublish = false, realParameters = false) {
   } } })
 }
 describe('编辑器回归', () => {
+  it('打开时丢弃历史选中标记，保存时只保留当前画布的选中状态', async () => {
+    const stored = validWorkflow()
+    vi.mocked(workflowApi.get).mockResolvedValueOnce({
+      ...stored,
+      nodes: stored.nodes.map(item => ({ ...item, selected: true })),
+      edges: stored.edges.map(edge => ({ ...edge, selected: true }))
+    })
+    const wrapper = editor(); await flushPromises()
+    const canvas = wrapper.getComponent(FlowCanvas)
+    expect(canvas.props('nodes')).toEqual(stored.nodes)
+    expect(canvas.props('edges')).toEqual(stored.edges)
+
+    const selectedNodes = [{ ...node, selected: true }, end]
+    canvas.vm.$emit('update:nodes', selectedNodes)
+    canvas.vm.$emit('update:edges', [{ ...stored.edges[0], selected: true }])
+    const saveButton = wrapper.findAll('button').find(button => button.text() === '保存')!
+    await saveButton.trigger('click'); await flushPromises()
+    expect(workflowApi.update).toHaveBeenCalledWith(1, stored)
+    expect(canvas.props('nodes')).toEqual(selectedNodes)
+    wrapper.unmount()
+  })
   it('保存并离开期间继续编辑时留在当前页面，避免丢失新修改', async () => {
     vi.mocked(workflowApi.get).mockResolvedValueOnce(validWorkflow())
     let finishSave: () => void = () => {}
